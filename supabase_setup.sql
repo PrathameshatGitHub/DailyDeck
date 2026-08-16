@@ -18,8 +18,13 @@ create table notes (
   user_id uuid references auth.users not null,
   note_date date not null default current_date,
   content text not null,
+  is_pinned boolean not null default false,
   created_at timestamptz default now()
 );
+
+-- If you have an existing notes table, run this:
+-- alter table notes add column if not exists is_pinned boolean not null default false;
+
 
 -- task_logs table (Task & Date tab)
 create table task_logs (
@@ -109,4 +114,25 @@ create table email_queue (
 
 alter table email_queue enable row level security;
 create policy "Users manage own email queue" on email_queue
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- user_smtp_config table — stores per-user SMTP settings and campaign defaults
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table user_smtp_config (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid references auth.users not null unique,
+  smtp_email        text,
+  smtp_password     text,
+  smtp_sender_name  text,
+  sending_speed     text not null default 'medium' check (sending_speed in ('slow', 'medium', 'fast')),
+  campaign_subject  text,
+  campaign_body     text,
+  updated_at        timestamptz default now(),
+  created_at        timestamptz default now()
+);
+
+alter table user_smtp_config enable row level security;
+create policy "Users manage own smtp config" on user_smtp_config
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

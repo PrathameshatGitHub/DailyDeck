@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Send, Play, Pause, AlertCircle, CheckCircle2, Lock, KeyRound,
-  Upload, FileSpreadsheet, X, Copy, Users, Info,
+  Upload, FileSpreadsheet, X, Copy, Users, Info, Save, Check,
 } from 'lucide-react';
 import { useCampaign }                     from '@/lib/context/CampaignContext';
 import { RecipientCardItem, type RecipientCard } from '@/components/RecipientCard';
@@ -63,11 +63,15 @@ export default function CampaignsPage() {
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
   }, [supabase]);
 
-  // SMTP
-  const [smtpEmail,       setSmtpEmail]       = useState('');
-  const [smtpPassword,    setSmtpPassword]    = useState('');
-  const [smtpSenderName,  setSmtpSenderName]  = useState('');
+  // SMTP — local draft state seeded from DB config
+  const [smtpEmail,        setSmtpEmail]        = useState('');
+  const [smtpPassword,     setSmtpPassword]     = useState('');
+  const [smtpSenderName,   setSmtpSenderName]   = useState('');
   const [showSmtpSettings, setShowSmtpSettings] = useState(false);
+  const [configSaving,     setConfigSaving]     = useState(false);
+  const [configSaved,      setConfigSaved]      = useState(false);
+  const [configError,      setConfigError]      = useState<string | null>(null);
+  const [draftSpeed,       setDraftSpeed]       = useState<'slow' | 'medium' | 'fast'>('medium');
 
   // Form
   const [subject,          setSubject]          = useState('');
@@ -93,33 +97,43 @@ export default function CampaignsPage() {
   const {
     activeCampaignId, isRelayActive, status, lastEmailSent, relayError,
     allRecipients, attachments, setAttachments, sendingSpeed, setSendingSpeed,
+    smtpConfig, configLoading, saveSmtpConfig,
     startCampaign, toggleRelay, resetCampaign,
   } = useCampaign();
 
-  // ── Persist SMTP + form ──────────────────────────────────────────────────
+  // ── Seed local draft state from DB config once loaded ────────────────────
   useEffect(() => {
-    const e = localStorage.getItem('smtpEmail');
-    const p = localStorage.getItem('smtpPassword');
-    const n = localStorage.getItem('smtpSenderName');
-    const s = localStorage.getItem('campaignSubject');
-    const b = localStorage.getItem('campaignBody');
-    if (e) setSmtpEmail(e);
-    if (p) setSmtpPassword(p);
-    if (n) setSmtpSenderName(n);
-    if (s) setSubject(s);
-    if (b) setBody(b);
-  }, []);
+    if (configLoading) return;
+    setSmtpEmail(smtpConfig.smtp_email || '');
+    setSmtpPassword(smtpConfig.smtp_password || '');
+    setSmtpSenderName(smtpConfig.smtp_sender_name || '');
+    setDraftSpeed(smtpConfig.sending_speed || 'medium');
+    if (smtpConfig.campaign_subject) setSubject(smtpConfig.campaign_subject);
+    if (smtpConfig.campaign_body)    setBody(smtpConfig.campaign_body);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configLoading]);
 
-  useEffect(() => {
-    if (smtpEmail)      localStorage.setItem('smtpEmail',      smtpEmail);
-    if (smtpPassword)   localStorage.setItem('smtpPassword',   smtpPassword);
-    if (smtpSenderName) localStorage.setItem('smtpSenderName', smtpSenderName);
-  }, [smtpEmail, smtpPassword, smtpSenderName]);
-
-  useEffect(() => {
-    localStorage.setItem('campaignSubject', subject);
-    localStorage.setItem('campaignBody',    body);
-  }, [subject, body]);
+  // ── Save Configuration to DB ─────────────────────────────────────────────
+  const handleSaveConfig = async () => {
+    setConfigSaving(true);
+    setConfigError(null);
+    const result = await saveSmtpConfig({
+      smtp_email:       smtpEmail,
+      smtp_password:    smtpPassword,
+      smtp_sender_name: smtpSenderName,
+      sending_speed:    draftSpeed,
+      campaign_subject: subject,
+      campaign_body:    body,
+    });
+    setConfigSaving(false);
+    if (result.success) {
+      setSendingSpeed(draftSpeed);
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 3000);
+    } else {
+      setConfigError(result.error || 'Failed to save configuration.');
+    }
+  };
 
   // ── History fetch ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -276,73 +290,120 @@ export default function CampaignsPage() {
       {/* SMTP Settings Panel */}
       {showSmtpSettings && (
         <div className="bg-[#1F2329] p-4 border border-[#242930] rounded-xl flex flex-col gap-4">
-          <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 uppercase font-bold tracking-wider">
-            <KeyRound className="w-4 h-4 text-[#E8B54D]" />
-            Local SMTP Settings (Bring Your Own Key)
+          {/* Panel Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 uppercase font-bold tracking-wider">
+              <KeyRound className="w-4 h-4 text-[#E8B54D]" />
+              SMTP Configuration
+            </div>
+            {configSaved && (
+              <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-[#7FE7C4] animate-in fade-in">
+                <Check className="w-3 h-3" />
+                Saved to database
+              </span>
+            )}
           </div>
+
           <p className="text-xs text-zinc-500 font-mono">
-            Credentials are stored in your browser's local storage and never saved to the database.
+            Credentials are <span className="text-[#7FE7C4] font-bold">saved to your account database</span> — available on all devices.
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              { label: 'Sender Name', value: smtpSenderName, setter: setSmtpSenderName, type: 'text',     placeholder: 'e.g. John from Acme' },
-              { label: 'Gmail Address', value: smtpEmail,    setter: setSmtpEmail,      type: 'email',    placeholder: 'you@gmail.com' },
-              { label: 'Gmail App Password', value: smtpPassword, setter: setSmtpPassword, type: 'password', placeholder: '16-character app password' },
-            ].map(({ label, value, setter, type, placeholder }) => (
-              <div key={label}>
-                <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-1.5">{label}</label>
-                <input
-                  type={type}
-                  value={value}
-                  onChange={e => setter(e.target.value)}
-                  placeholder={placeholder}
-                  className="w-full bg-[#15181D] px-3 py-2 rounded border border-[#242930] outline-none focus:border-[#E8B54D]/50 text-sm text-zinc-200 font-mono"
-                />
+
+          {configLoading ? (
+            <div className="py-4 font-mono text-xs text-zinc-500 animate-pulse">&gt; loading_config...</div>
+          ) : (
+            <>
+              {/* Credential Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[
+                  { label: 'Sender Name',        value: smtpSenderName, setter: setSmtpSenderName, type: 'text',     placeholder: 'e.g. John from Acme' },
+                  { label: 'Gmail Address',       value: smtpEmail,      setter: setSmtpEmail,      type: 'email',    placeholder: 'you@gmail.com' },
+                  { label: 'Gmail App Password',  value: smtpPassword,   setter: setSmtpPassword,   type: 'password', placeholder: '16-character app password' },
+                ].map(({ label, value, setter, type, placeholder }) => (
+                  <div key={label}>
+                    <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-1.5">{label}</label>
+                    <input
+                      type={type}
+                      value={value}
+                      onChange={e => { setter(e.target.value); setConfigSaved(false); }}
+                      placeholder={placeholder}
+                      className="w-full bg-[#15181D] px-3 py-2 rounded border border-[#242930] outline-none focus:border-[#E8B54D]/50 text-sm text-zinc-200 font-mono"
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="pt-2 border-t border-[#242930]">
-            <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">Sending Speed (Anti-Spam Protection)</label>
-            <div className="flex gap-2">
-              {[
-                { value: 'slow' as const, label: 'Slow (10s)', desc: 'Best for large campaigns' },
-                { value: 'medium' as const, label: 'Medium (5s)', desc: 'Balanced speed' },
-                { value: 'fast' as const, label: 'Fast (2s)', desc: 'Quick delivery' },
-              ].map(({ value, label, desc }) => (
+
+              {/* Sending Speed */}
+              <div className="pt-2 border-t border-[#242930]">
+                <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">Sending Speed (Anti-Spam Protection)</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'slow'   as const, label: 'Slow (10s)',   desc: 'Best for large campaigns' },
+                    { value: 'medium' as const, label: 'Medium (5s)',  desc: 'Balanced speed' },
+                    { value: 'fast'   as const, label: 'Fast (2s)',    desc: 'Quick delivery' },
+                  ].map(({ value, label, desc }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => { setDraftSpeed(value); setConfigSaved(false); }}
+                      className={`flex-1 px-3 py-2 rounded border text-left transition-all ${
+                        draftSpeed === value
+                          ? 'bg-[#89295E] border-[#89295E] text-white'
+                          : 'bg-[#15181D] border-[#242930] text-zinc-400 hover:border-zinc-600'
+                      }`}
+                    >
+                      <div className="text-[10px] font-mono font-bold uppercase">{label}</div>
+                      <div className="text-[9px] text-zinc-500 mt-0.5">{desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-3 border-t border-[#242930] flex items-center justify-between gap-4">
+                {configError && (
+                  <p className="text-[10px] text-red-400 font-mono">{configError}</p>
+                )}
                 <button
-                  key={value}
                   type="button"
-                  onClick={() => setSendingSpeed(value)}
-                  className={`flex-1 px-3 py-2 rounded border text-left transition-all ${
-                    sendingSpeed === value
-                      ? 'bg-[#89295E] border-[#89295E] text-white'
-                      : 'bg-[#15181D] border-[#242930] text-zinc-400 hover:border-zinc-600'
+                  onClick={handleSaveConfig}
+                  disabled={configSaving}
+                  className={`ml-auto flex items-center gap-2 px-5 py-2 rounded-lg font-mono text-xs font-bold tracking-wide transition-all shadow ${
+                    configSaved
+                      ? 'bg-[#7FE7C4]/20 text-[#7FE7C4] border border-[#7FE7C4]/40'
+                      : 'bg-[#89295E] hover:bg-[#a03672] text-white disabled:opacity-50'
                   }`}
                 >
-                  <div className="text-[10px] font-mono font-bold uppercase">{label}</div>
-                  <div className="text-[9px] text-zinc-500 mt-0.5">{desc}</div>
+                  {configSaving ? (
+                    <span className="animate-pulse">Saving...</span>
+                  ) : configSaved ? (
+                    <><Check className="w-3.5 h-3.5" /> Configuration Saved</>
+                  ) : (
+                    <><Save className="w-3.5 h-3.5" /> Save Configuration</>
+                  )}
                 </button>
-              ))}
-            </div>
-          </div>
-          <div className="pt-2 border-t border-[#242930]">
-            <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">Domain Authentication (SPF/DKIM)</label>
-            <div className="bg-[#15181D] p-3 rounded border border-[#242930] text-[10px] text-zinc-400 font-mono space-y-2">
-              <p className="text-[#E8B54D] font-bold">⚠️ Important for Deliverability</p>
-              <p>To improve email deliverability and avoid spam folders, add these DNS records to your domain:</p>
-              <div className="space-y-1.5">
-                <div>
-                  <span className="text-[#7FE7C4] font-bold">SPF Record:</span>
-                  <code className="block bg-[#0D0F12] p-1.5 rounded mt-1 text-zinc-300">v=spf1 include:_spf.google.com ~all</code>
-                </div>
-                <div>
-                  <span className="text-[#7FE7C4] font-bold">DKIM:</span>
-                  <p className="mt-1">Generate DKIM keys in Gmail Workspace admin and add the CNAME record provided.</p>
+              </div>
+
+              {/* SPF/DKIM Info */}
+              <div className="pt-2 border-t border-[#242930]">
+                <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">Domain Authentication (SPF/DKIM)</label>
+                <div className="bg-[#15181D] p-3 rounded border border-[#242930] text-[10px] text-zinc-400 font-mono space-y-2">
+                  <p className="text-[#E8B54D] font-bold">⚠️ Important for Deliverability</p>
+                  <p>To improve email deliverability and avoid spam folders, add these DNS records to your domain:</p>
+                  <div className="space-y-1.5">
+                    <div>
+                      <span className="text-[#7FE7C4] font-bold">SPF Record:</span>
+                      <code className="block bg-[#0D0F12] p-1.5 rounded mt-1 text-zinc-300">v=spf1 include:_spf.google.com ~all</code>
+                    </div>
+                    <div>
+                      <span className="text-[#7FE7C4] font-bold">DKIM:</span>
+                      <p className="mt-1">Generate DKIM keys in Gmail Workspace admin and add the CNAME record provided.</p>
+                    </div>
+                  </div>
+                  <p className="text-zinc-500">These settings help email providers verify your emails are legitimate.</p>
                 </div>
               </div>
-              <p className="text-zinc-500">These settings help email providers verify your emails are legitimate.</p>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       )}
 

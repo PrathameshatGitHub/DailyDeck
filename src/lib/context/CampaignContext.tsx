@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { RecipientCard } from '@/components/RecipientCard';
 
@@ -19,26 +19,48 @@ interface Attachment {
   contentType: string;
 }
 
+export interface SmtpConfig {
+  smtp_email:        string;
+  smtp_password:     string;
+  smtp_sender_name:  string;
+  sending_speed:     'slow' | 'medium' | 'fast';
+  campaign_subject:  string;
+  campaign_body:     string;
+}
+
 interface CampaignContextType {
   activeCampaignId: string | null;
   isRelayActive:    boolean;
   status:           CampaignStatus;
   lastEmailSent:    string;
   relayError:       string | null;
-  allRecipients:    RecipientCard[];       // unified list with status per card
+  allRecipients:    RecipientCard[];
   attachments:      Attachment[];
   setAttachments:   React.Dispatch<React.SetStateAction<Attachment[]>>;
   sendingSpeed:     'slow' | 'medium' | 'fast';
   setSendingSpeed:  React.Dispatch<React.SetStateAction<'slow' | 'medium' | 'fast'>>;
+  // Config stored in DB
+  smtpConfig:       SmtpConfig;
+  configLoading:    boolean;
+  saveSmtpConfig:   (config: Partial<SmtpConfig>) => Promise<{ success: boolean; error?: string }>;
   startCampaign:    (
     subject:    string,
     body:       string,
-    recipients: string | RecipientCard[], // string = paste mode, array = CSV mode
+    recipients: string | RecipientCard[],
     replyTo:    string
   ) => Promise<boolean>;
   toggleRelay:   (active: boolean) => void;
   resetCampaign: () => void;
 }
+
+const defaultConfig: SmtpConfig = {
+  smtp_email:        '',
+  smtp_password:     '',
+  smtp_sender_name:  '',
+  sending_speed:     'medium',
+  campaign_subject:  '',
+  campaign_body:     '',
+};
 
 const CampaignContext = createContext<CampaignContextType | undefined>(undefined);
 
@@ -51,7 +73,11 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   const [relayError,       setRelayError]       = useState<string | null>(null);
   const [attachments,      setAttachments]      = useState<Attachment[]>([]);
   const [allRecipients,    setAllRecipients]    = useState<RecipientCard[]>([]);
-  const [sendingSpeed,    setSendingSpeed]    = useState<'slow' | 'medium' | 'fast'>('medium');
+  const [sendingSpeed,     setSendingSpeed]     = useState<'slow' | 'medium' | 'fast'>('medium');
+
+  // DB-backed SMTP config
+  const [smtpConfig,    setSmtpConfig]    = useState<SmtpConfig>(defaultConfig);
+  const [configLoading, setConfigLoading] = useState(true);
 
   const [status, setStatus] = useState<CampaignStatus>({
     total: 0, pending: 0, sent: 0, failed: 0, campaign_status: '',
@@ -60,17 +86,48 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const pollRef  = useRef<NodeJS.Timeout | null>(null);
 
-  // ── 1. Initial Load from LocalStorage ─────────────────────────────────────
+  // ── 1. Load config from DB on mount ──────────────────────────────────────
+  const loadConfig = useCallback(async () => {
+    setConfigLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setConfigLoading(false); return; }
+
+      const res = await fetch('/api/config', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+
+      if (data.config) {
+        const cfg = data.config as SmtpConfig;
+        setSmtpConfig({
+          smtp_email:       cfg.smtp_email       || '',
+          smtp_password:    cfg.smtp_password    || '',
+          smtp_sender_name: cfg.smtp_sender_name || '',
+          sending_speed:    cfg.sending_speed    || 'medium',
+          campaign_subject: cfg.campaign_subject || '',
+          campaign_body:    cfg.campaign_body    || '',
+        });
+        setSendingSpeed(cfg.sending_speed || 'medium');
+      }
+    } catch (err) {
+      console.error('Failed to load config:', err);
+    }
+    setConfigLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  // ── 2. Persist activeCampaignId / relay state in localStorage (session-level only) ──
   useEffect(() => {
     const savedId          = localStorage.getItem('activeCampaignId');
     const savedRelayActive = localStorage.getItem('isRelayActive');
-    const savedSpeed       = localStorage.getItem('sendingSpeed') as 'slow' | 'medium' | 'fast' | null;
     if (savedId)                     setActiveCampaignId(savedId);
     if (savedRelayActive === 'true') setIsRelayActive(true);
-    if (savedSpeed)                  setSendingSpeed(savedSpeed);
   }, []);
 
-  // ── 2. Persist state to LocalStorage ──────────────────────────────────────
   useEffect(() => {
     if (activeCampaignId) {
       localStorage.setItem('activeCampaignId', activeCampaignId);
@@ -83,11 +140,41 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('isRelayActive', String(isRelayActive));
   }, [isRelayActive]);
 
-  useEffect(() => {
-    localStorage.setItem('sendingSpeed', sendingSpeed);
-  }, [sendingSpeed]);
+  // ── 3. saveSmtpConfig — explicit save to DB ───────────────────────────────
+  const saveSmtpConfig = useCallback(async (partial: Partial<SmtpConfig>) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { success: false, error: 'Not authenticated' };
 
-  // ── 3. Status Polling (updates recipient card statuses) ───────────────────
+      const merged: SmtpConfig = { ...smtpConfig, ...partial };
+      setSmtpConfig(merged);
+      if (partial.sending_speed) setSendingSpeed(partial.sending_speed);
+
+      const res = await fetch('/api/config', {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          smtp_email:       merged.smtp_email,
+          smtp_password:    merged.smtp_password,
+          smtp_sender_name: merged.smtp_sender_name,
+          sending_speed:    merged.sending_speed,
+          campaign_subject: merged.campaign_subject,
+          campaign_body:    merged.campaign_body,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) return { success: false, error: data.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }, [smtpConfig, supabase]);
+
+  // ── 4. Status Polling ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!activeCampaignId) return;
 
@@ -109,7 +196,6 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
           subject:         data.subject,
         });
 
-        // Build unified recipient card list: sent first, then pending, then failed
         const combined: RecipientCard[] = [
           ...(data.sent_recipients    || []).map((r: any) => ({ ...r, status: 'sent'    as const })),
           ...(data.pending_recipients || []).map((r: any) => ({ ...r, status: 'pending' as const })),
@@ -131,7 +217,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeCampaignId, supabase]);
 
-  // ── 4. Relay Loop ─────────────────────────────────────────────────────────
+  // ── 5. Relay Loop — reads from smtpConfig (DB-backed) ────────────────────
   useEffect(() => {
     if (!isRelayActive || !activeCampaignId) {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -140,17 +226,14 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
 
     const sendNext = async () => {
       try {
-        const smtpEmail      = localStorage.getItem('smtpEmail')      || '';
-        const smtpPassword   = localStorage.getItem('smtpPassword')   || '';
-        const smtpSenderName = localStorage.getItem('smtpSenderName') || smtpEmail;
+        const { smtp_email, smtp_password, smtp_sender_name } = smtpConfig;
 
-        if (!smtpEmail || !smtpPassword) {
-          setRelayError('SMTP credentials missing. Please configure them in Campaign Settings.');
+        if (!smtp_email || !smtp_password) {
+          setRelayError('SMTP credentials missing. Please configure them in Campaign Settings and save.');
           setIsRelayActive(false);
           return;
         }
 
-        // Calculate delay based on sending speed
         const delayMap = { slow: 10000, medium: 5000, fast: 2000 };
         const delay_ms = delayMap[sendingSpeed];
 
@@ -158,14 +241,14 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/campaigns/send-next', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
-          body:    JSON.stringify({
+          body: JSON.stringify({
             campaign_id:      activeCampaignId,
-            smtp_user:        smtpEmail,
-            smtp_pass:        smtpPassword,
-            smtp_sender_name: smtpSenderName,
+            smtp_user:        smtp_email,
+            smtp_pass:        smtp_password,
+            smtp_sender_name: smtp_sender_name || smtp_email,
             attachments,
             delay_ms,
-          })
+          }),
         });
 
         const data = await res.json();
@@ -184,7 +267,6 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
           setRelayError(null);
         }
 
-        // Use a ref check so we don't read stale closure value
         timerRef.current = setTimeout(sendNext, delay_ms);
       } catch (error) {
         console.error('Relay error:', error);
@@ -194,7 +276,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
 
     sendNext();
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isRelayActive, activeCampaignId, attachments, sendingSpeed, supabase]);
+  }, [isRelayActive, activeCampaignId, attachments, sendingSpeed, smtpConfig, supabase]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const startCampaign = async (
@@ -211,13 +293,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/campaigns/create', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
-        body:    JSON.stringify({
-          subject,
-          content:    body,
-          recipients, // string → legacy, array → CSV personalized
-          user_id:    user.id,
-          reply_to:   replyTo,
-        })
+        body: JSON.stringify({ subject, content: body, recipients, user_id: user.id, reply_to: replyTo }),
       });
 
       const data = await res.json();
@@ -265,6 +341,9 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         setAttachments,
         sendingSpeed,
         setSendingSpeed,
+        smtpConfig,
+        configLoading,
+        saveSmtpConfig,
         startCampaign,
         toggleRelay,
         resetCampaign,
