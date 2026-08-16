@@ -136,3 +136,24 @@ create table user_smtp_config (
 alter table user_smtp_config enable row level security;
 create policy "Users manage own smtp config" on user_smtp_config
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- whatsapp_contacts table — stores contacts & outreach message cards
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table whatsapp_contacts (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid references auth.users not null,
+  name         text,
+  phone        text not null,
+  company      text,
+  message      text not null,
+  batch_title  text,
+  status       text not null default 'pending' check (status in ('pending', 'contacted')),
+  created_at   timestamptz default now()
+);
+
+alter table whatsapp_contacts enable row level security;
+create policy "Users manage own whatsapp contacts" on whatsapp_contacts
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+

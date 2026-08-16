@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { CheckSquare, FileText, Calendar, LogOut, Terminal, Mail, ListTodo, Send, Coins, Bell, AlarmClock, Check, X, ChevronDown } from 'lucide-react';
+import { CheckSquare, FileText, Calendar, LogOut, Terminal, Mail, ListTodo, Send, Coins, Bell, AlarmClock, Check, X, ChevronDown, Sparkles, MessageCircle } from 'lucide-react';
 import { CampaignProvider, useCampaign } from '@/lib/context/CampaignContext';
 import { useJobCallbacks } from '@/lib/hooks/useJobCallbacks';
 
@@ -13,6 +13,8 @@ const tabs = [
   { href: '/notes', label: 'notes', icon: FileText },
   { href: '/task-date', label: 'logs', icon: Calendar },
   { href: '/emails', label: 'emails', icon: Mail },
+  { href: '/whatsapp', label: 'whatsapp', icon: MessageCircle },
+  { href: '/ai', label: 'ai extractor', icon: Sparkles },
   { href: '/todos', label: 'schedules', icon: ListTodo },
   { href: '/finance', label: 'finance', icon: Coins },
   { href: '/campaigns', label: 'campaigns', icon: Send },

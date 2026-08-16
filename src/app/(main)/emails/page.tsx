@@ -53,6 +53,11 @@ export default function EmailsPage() {
   });
 
   displayedEmails.sort((a, b) => {
+    // Pending (0) comes before Completed (1)
+    const aOrder = a.status === 'pending' ? 0 : 1;
+    const bOrder = b.status === 'pending' ? 0 : 1;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+
     if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     if (sortBy === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     if (sortBy === 'updated') return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
@@ -230,6 +235,10 @@ function EmailCard({
     onCopy("Email copied successfully.");
   };
 
+  // Count valid unique emails in the card content
+  const emailMatches = (content.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || []);
+  const emailCount = new Set(emailMatches.map(e => e.toLowerCase().trim())).size;
+
   return (
     <div className={`flex flex-col bg-[#15181D] border rounded-2xl overflow-hidden transition-colors ${
       isCompleted ? 'border-[#7FE7C4]/30' : 'border-[#242930] hover:border-zinc-700/80'
@@ -243,11 +252,19 @@ function EmailCard({
             className="w-full bg-transparent border-none outline-none text-sm font-bold text-zinc-200 placeholder:text-zinc-600 truncate focus:text-white transition-colors"
             placeholder="Email Title..."
           />
-          {email.category && (
-            <span className="inline-block px-2 py-0.5 rounded border border-[#242930] bg-[#1F2329] text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider">
-              {email.category}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {emailCount > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[#7FE7C4]/30 bg-[#7FE7C4]/15 text-[10px] font-mono font-bold text-[#7FE7C4]">
+                <Mail className="w-3 h-3" />
+                {emailCount} {emailCount === 1 ? 'email' : 'emails'}
+              </span>
+            )}
+            {email.category && (
+              <span className="inline-block px-2 py-0.5 rounded border border-[#242930] bg-[#1F2329] text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider">
+                {email.category}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Status Segmented Control */}

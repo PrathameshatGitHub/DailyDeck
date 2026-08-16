@@ -47,5 +47,25 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* Global clickable cursor pointer */
+button,
+[role="button"],
+input[type="submit"],
+input[type="button"],
+input[type="checkbox"],
+input[type="radio"],
+select,
+summary,
+a {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+
 
 
