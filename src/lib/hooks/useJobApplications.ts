@@ -94,7 +94,7 @@ export function useJobApplications() {
       phone: it.phone || null,
       subject: it.subject,
       body: it.body,
-      status: 'pending',
+      status: 'pending' as const,
       created_at: now,
     }));
 
@@ -153,7 +153,7 @@ export function useJobApplications() {
   const toggleStatus = async (id: string) => {
     const current = applications.find((a) => a.id === id);
     if (!current) return;
-    const newStatus = current.status === 'pending' ? 'completed' : 'pending';
+    const newStatus: 'pending' | 'completed' = current.status === 'pending' ? 'completed' : 'pending';
 
     setApplications((prev) => {
       const next = prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a));
