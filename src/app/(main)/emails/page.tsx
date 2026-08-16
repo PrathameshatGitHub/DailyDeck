@@ -247,7 +247,7 @@ function EmailCard({
       <div className="p-4 border-b border-[#242930] flex flex-wrap items-start justify-between gap-3 bg-[#0D0F12]/30">
         <div className="flex-1 min-w-0 space-y-2">
           <input 
-            value={email.title}
+            value={email.title || ''}
             onChange={(e) => onUpdate(email.id, { title: e.target.value })}
             className="w-full bg-transparent border-none outline-none text-sm font-bold text-zinc-200 placeholder:text-zinc-600 truncate focus:text-white transition-colors"
             placeholder="Email Title..."
