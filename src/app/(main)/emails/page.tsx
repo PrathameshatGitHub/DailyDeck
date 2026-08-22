@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useEmails, type Email } from '@/lib/hooks/useEmails';
+import { MultiSelectBar } from '@/components/MultiSelectBar';
 import { Copy, Plus, Trash2, CopyPlus, Search, CheckCircle2, Circle, Clock, Mail } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
@@ -14,6 +15,10 @@ export default function EmailsPage() {
   
   const [toast, setToast] = useState<string | null>(null);
   const [emailToDelete, setEmailToDelete] = useState<string | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // New Email Form State
   const [newTitle, setNewTitle] = useState('');
@@ -53,7 +58,6 @@ export default function EmailsPage() {
   });
 
   displayedEmails.sort((a, b) => {
-    // Pending (0) comes before Completed (1)
     const aOrder = a.status === 'pending' ? 0 : 1;
     const bOrder = b.status === 'pending' ? 0 : 1;
     if (aOrder !== bOrder) return aOrder - bOrder;
@@ -68,8 +72,38 @@ export default function EmailsPage() {
   const pendingCount = emails.filter(e => e.status === 'pending').length;
   const completedCount = emails.filter(e => e.status === 'completed').length;
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(displayedEmails.map(e => e.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkMarkCompleted = async () => {
+    await Promise.all([...selectedIds].map(id => updateEmail(id, { status: 'completed' })));
+    showToast(`${selectedIds.size} templates marked completed`);
+    clearSelection();
+  };
+
+  const handleBulkMarkPending = async () => {
+    await Promise.all([...selectedIds].map(id => updateEmail(id, { status: 'pending' })));
+    showToast(`${selectedIds.size} templates marked pending`);
+    clearSelection();
+  };
+
+  const handleBulkDelete = async () => {
+    await Promise.all([...selectedIds].map(id => deleteEmail(id)));
+    showToast(`${selectedIds.size} templates deleted`);
+    clearSelection();
+    setConfirmBulkDelete(false);
+  };
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto font-sans relative">
+    <div className="space-y-4 max-w-5xl mx-auto font-sans relative">
       {/* Toast Notification */}
       {toast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#7FE7C4] text-black px-4 py-2 rounded shadow-lg font-mono text-xs font-bold animate-in fade-in slide-in-from-top-4">
@@ -77,7 +111,7 @@ export default function EmailsPage() {
         </div>
       )}
 
-      {/* Dev Stats Strip - Monospace */}
+      {/* Stats Strip */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#242930] gap-2 font-mono text-xs text-zinc-400">
         <div className="flex items-center gap-1">
           <span className="text-[#89295E] font-bold">&gt;</span>
@@ -86,10 +120,19 @@ export default function EmailsPage() {
             {pendingCount} pending &bull; {completedCount} completed &bull; {emails.length} total
           </span>
         </div>
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest">
-          templates_active
-        </div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest">templates_active</div>
       </div>
+
+      {/* Multi-Select Bar */}
+      <MultiSelectBar
+        selectedCount={selectedIds.size}
+        totalCount={displayedEmails.length}
+        onSelectAll={selectAll}
+        onClearAll={clearSelection}
+        onMarkCompleted={handleBulkMarkCompleted}
+        onMarkPending={handleBulkMarkPending}
+        onDeleteSelected={() => setConfirmBulkDelete(true)}
+      />
 
       {/* Creation Form */}
       <form onSubmit={handleCreate} className="flex flex-wrap gap-3 bg-[#15181D] p-3 border border-[#242930] rounded">
@@ -119,19 +162,16 @@ export default function EmailsPage() {
         </div>
       </form>
 
-      {/* Filters & Search - Monospace */}
+      {/* Filters & Search */}
       <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between pb-3 border-b border-[#242930] font-mono text-xs">
         <div className="flex flex-wrap gap-3">
-          {/* Status Filter */}
           <div className="flex bg-[#15181D] p-0.5 rounded border border-[#242930]">
             {(['all', 'pending', 'completed'] as const).map((filter) => (
               <button
                 key={filter}
                 onClick={() => setStatusFilter(filter)}
                 className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                  statusFilter === filter
-                    ? 'bg-[#89295E] text-white'
-                    : 'text-zinc-500 hover:text-zinc-350'
+                  statusFilter === filter ? 'bg-[#89295E] text-white' : 'text-zinc-500 hover:text-zinc-350'
                 }`}
               >
                 {filter}
@@ -139,7 +179,6 @@ export default function EmailsPage() {
             ))}
           </div>
 
-          {/* Sort Dropdown */}
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
@@ -152,7 +191,6 @@ export default function EmailsPage() {
           </select>
         </div>
 
-        {/* Search */}
         <div className="relative min-w-[200px] sm:w-64">
           <Search className="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
@@ -174,6 +212,8 @@ export default function EmailsPage() {
             onDelete={setEmailToDelete}
             onDuplicate={duplicateEmail}
             onCopy={showToast}
+            isSelected={selectedIds.has(email.id)}
+            onToggleSelect={toggleSelect}
           />
         ))}
 
@@ -187,12 +227,25 @@ export default function EmailsPage() {
         )}
       </div>
 
+      {/* Single delete confirm */}
       <ConfirmModal 
         isOpen={!!emailToDelete}
+        title="Delete Email Template"
+        message="Are you sure you want to delete this email template?"
         onConfirm={() => {
           if (emailToDelete) deleteEmail(emailToDelete);
+          setEmailToDelete(null);
         }}
         onCancel={() => setEmailToDelete(null)}
+      />
+
+      {/* Bulk delete confirm */}
+      <ConfirmModal
+        isOpen={confirmBulkDelete}
+        title={`Delete ${selectedIds.size} Templates`}
+        message={`Are you sure you want to permanently delete ${selectedIds.size} selected email templates? This cannot be undone.`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
       />
     </div>
   );
@@ -203,24 +256,26 @@ function EmailCard({
   onUpdate, 
   onDelete, 
   onDuplicate,
-  onCopy
+  onCopy,
+  isSelected,
+  onToggleSelect,
 }: { 
   email: Email, 
   onUpdate: (id: string, updates: Partial<Email>) => void,
   onDelete: (id: string) => void,
   onDuplicate: (email: Email) => void,
-  onCopy: (msg: string) => void
+  onCopy: (msg: string) => void,
+  isSelected: boolean,
+  onToggleSelect: (id: string) => void,
 }) {
   const isCompleted = email.status === 'completed';
   
-  // Local state for debounced content updates
   const [content, setContent] = useState(email.content || '');
 
   useEffect(() => {
     setContent(email.content || '');
   }, [email.content]);
 
-  // Debounced auto-save for content
   useEffect(() => {
     const handler = setTimeout(() => {
       if (content !== email.content) {
@@ -235,35 +290,51 @@ function EmailCard({
     onCopy("Email copied successfully.");
   };
 
-  // Count valid unique emails in the card content
   const emailMatches = (content.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || []);
   const emailCount = new Set(emailMatches.map(e => e.toLowerCase().trim())).size;
 
   return (
-    <div className={`flex flex-col bg-[#15181D] border rounded-2xl overflow-hidden transition-colors ${
-      isCompleted ? 'border-[#7FE7C4]/30' : 'border-[#242930] hover:border-zinc-700/80'
-    }`}>
+    <div
+      className={`flex flex-col bg-[#15181D] border rounded-2xl overflow-hidden transition-all ${
+        isSelected
+          ? 'border-[#89295E] ring-2 ring-[#89295E]/30'
+          : isCompleted ? 'border-[#7FE7C4]/30' : 'border-[#242930] hover:border-zinc-700/80'
+      }`}
+    >
       {/* Header */}
       <div className="p-4 border-b border-[#242930] flex flex-wrap items-start justify-between gap-3 bg-[#0D0F12]/30">
-        <div className="flex-1 min-w-0 space-y-2">
-          <input 
-            value={email.title || ''}
-            onChange={(e) => onUpdate(email.id, { title: e.target.value })}
-            className="w-full bg-transparent border-none outline-none text-sm font-bold text-zinc-200 placeholder:text-zinc-600 truncate focus:text-white transition-colors"
-            placeholder="Email Title..."
-          />
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {emailCount > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[#7FE7C4]/30 bg-[#7FE7C4]/15 text-[10px] font-mono font-bold text-[#7FE7C4]">
-                <Mail className="w-3 h-3" />
-                {emailCount} {emailCount === 1 ? 'email' : 'emails'}
-              </span>
-            )}
-            {email.category && (
-              <span className="inline-block px-2 py-0.5 rounded border border-[#242930] bg-[#1F2329] text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider">
-                {email.category}
-              </span>
-            )}
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          {/* Checkbox for multi-select */}
+          <button
+            onClick={() => onToggleSelect(email.id)}
+            className={`mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+              isSelected
+                ? 'bg-[#89295E] border-[#89295E]'
+                : 'border-zinc-600 hover:border-[#89295E]'
+            }`}
+          >
+            {isSelected && <span className="text-white text-[8px] font-bold">✓</span>}
+          </button>
+          <div className="flex-1 min-w-0 space-y-2">
+            <input 
+              value={email.title || ''}
+              onChange={(e) => onUpdate(email.id, { title: e.target.value })}
+              className="w-full bg-transparent border-none outline-none text-sm font-bold text-zinc-200 placeholder:text-zinc-600 truncate focus:text-white transition-colors"
+              placeholder="Email Title..."
+            />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {emailCount > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[#7FE7C4]/30 bg-[#7FE7C4]/15 text-[10px] font-mono font-bold text-[#7FE7C4]">
+                  <Mail className="w-3 h-3" />
+                  {emailCount} {emailCount === 1 ? 'email' : 'emails'}
+                </span>
+              )}
+              {email.category && (
+                <span className="inline-block px-2 py-0.5 rounded border border-[#242930] bg-[#1F2329] text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider">
+                  {email.category}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -290,7 +361,7 @@ function EmailCard({
         </div>
       </div>
 
-      {/* Body: Rich Text Area */}
+      {/* Body */}
       <div className="flex-1 p-4 bg-[#15181D]">
         <textarea
           value={content}

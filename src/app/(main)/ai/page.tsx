@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useEmails } from '@/lib/hooks/useEmails';
 import { useWhatsApp, buildWhatsAppLink, DEFAULT_WHATSAPP_TEMPLATE } from '@/lib/hooks/useWhatsApp';
 import { useJobApplications, type JobApplication } from '@/lib/hooks/useJobApplications';
+import { useEmailPreferences, type EmailPreferences } from '@/lib/hooks/useEmailPreferences';
 import {
   Sparkles,
   Copy,
@@ -32,7 +33,12 @@ import {
   CheckCircle2,
   Circle,
   Search,
-  X
+  X,
+  Settings2,
+  ChevronDown,
+  Save,
+  User,
+  Link
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
@@ -89,6 +95,16 @@ export default function AiExtractorPage() {
   const [extractionSource, setExtractionSource] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'comma' | 'table' | 'whatsapp' | 'lines'>('comma');
 
+  // Email Preferences
+  const { preferences, saving: prefsSaving, savePreferences, hasPreferences } = useEmailPreferences();
+  const [showPrefsPanel, setShowPrefsPanel] = useState(false);
+  const [localPrefs, setLocalPrefs] = useState<EmailPreferences>(preferences);
+
+  // Sync localPrefs when preferences load from DB
+  useEffect(() => {
+    setLocalPrefs(preferences);
+  }, [preferences]);
+
   // Load saved Groq API key from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('dailydeck_groq_key');
@@ -125,6 +141,7 @@ export default function AiExtractorPage() {
           text: rawText,
           apiKey: apiKey.trim() || undefined,
           mode: activeTab,
+          preferences,
         })
       });
 
@@ -309,6 +326,189 @@ export default function AiExtractorPage() {
       {activeTab === 'job_applications' && (
         <div className="space-y-6">
           
+          {/* ⚙️ Collapsible AI Email Preferences Panel */}
+          <div className="border border-[#242930] rounded-xl overflow-hidden shadow-sm">
+            {/* Toggle Header */}
+            <button
+              type="button"
+              onClick={() => setShowPrefsPanel((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-[#15181D] hover:bg-[#1a1e24] transition-colors group"
+            >
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <Settings2 className="w-3.5 h-3.5 text-[#89295E]" />
+                <span className="font-bold text-zinc-300">AI Email Preferences</span>
+                {hasPreferences ? (
+                  <span className="px-1.5 py-0.5 rounded bg-[#7FE7C4]/15 text-[#7FE7C4] text-[9px] font-bold border border-[#7FE7C4]/30">
+                    ✓ Profile Saved
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded bg-[#E8B54D]/15 text-[#E8B54D] text-[9px] font-bold border border-[#E8B54D]/30">
+                    Setup Required
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${showPrefsPanel ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Expandable Form */}
+            {showPrefsPanel && (
+              <div className="bg-[#0D0F12] border-t border-[#242930] p-4 space-y-4">
+                <p className="text-[10px] font-mono text-zinc-500 leading-relaxed">
+                  Fill in your profile once. The AI will use this to generate emails tailored to <span className="text-zinc-300 font-bold">any job role</span> — not just frontend. Your example email becomes the style guide.
+                </p>
+
+                {/* Row 1: Personal Info */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Full Name</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <User className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.full_name}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, full_name: e.target.value }))}
+                        placeholder="e.g. Prathamesh Mali"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Email</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Mail className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.your_email}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, your_email: e.target.value }))}
+                        placeholder="your@email.com"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Phone (with country code)</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Phone className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.phone}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, phone: e.target.value }))}
+                        placeholder="e.g. 7620537089"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">LinkedIn URL</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Link className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.linkedin_url}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, linkedin_url: e.target.value }))}
+                        placeholder="https://linkedin.com/in/you"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Portfolio URL</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Globe className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.portfolio_url}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, portfolio_url: e.target.value }))}
+                        placeholder="https://your-portfolio.dev"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Role / Title</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Briefcase className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.your_role}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, your_role: e.target.value }))}
+                        placeholder="e.g. Frontend Developer / Full Stack"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Years of Experience</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Sparkles className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.experience}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, experience: e.target.value }))}
+                        placeholder="e.g. 2 years"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1 sm:col-span-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Key Skills (comma separated)</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Zap className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.key_skills}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, key_skills: e.target.value }))}
+                        placeholder="React.js, Next.js, TypeScript, Node.js..."
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Example Subject */}
+                <div className="space-y-1">
+                  <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                    Example Subject Line <span className="text-zinc-600 normal-case">(AI adapts [Role] from the job post)</span>
+                  </label>
+                  <input
+                    value={localPrefs.example_subject}
+                    onChange={(e) => setLocalPrefs(p => ({ ...p, example_subject: e.target.value }))}
+                    placeholder="e.g. Application for [Role] Position - Prathamesh Mali"
+                    className="w-full bg-[#15181D] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono outline-none focus:border-[#89295E] placeholder:text-zinc-600"
+                  />
+                </div>
+
+                {/* Example Body */}
+                <div className="space-y-1">
+                  <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                    Example Email Body <span className="text-zinc-600 normal-case">(Your best cold email — AI uses this as style reference and adapts per job)</span>
+                  </label>
+                  <textarea
+                    value={localPrefs.example_body}
+                    onChange={(e) => setLocalPrefs(p => ({ ...p, example_body: e.target.value }))}
+                    rows={8}
+                    placeholder={`Hi [Recruiter Name],\n\nI hope this message finds you well.\n\nI am writing to apply for the [Role] position at [Company]. I have 2 years of experience in frontend development specializing in React.js, Next.js, and TypeScript...\n\n...\n\nBest regards,\nYour Name`}
+                    className="w-full bg-[#15181D] border border-[#242930] rounded-lg p-3 text-xs text-zinc-300 font-sans leading-relaxed outline-none focus:border-[#89295E] resize-none placeholder:text-zinc-600"
+                  />
+                </div>
+
+                {/* Save Button */}
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-[9px] font-mono text-zinc-600">Saved to your account — synced across sessions</p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await savePreferences(localPrefs);
+                      if (ok) {
+                        showNotification('✓ Email preferences saved!');
+                        setShowPrefsPanel(false);
+                      } else {
+                        showNotification('Failed to save preferences. Check DB.');
+                      }
+                    }}
+                    disabled={prefsSaving}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold font-mono transition-all"
+                  >
+                    <Save className="w-3 h-3" />
+                    <span>{prefsSaving ? 'Saving...' : 'Save Preferences'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Paste Section */}
           <div className="bg-[#15181D] border border-[#242930] rounded-xl p-4 space-y-3 shadow-md">
             <div className="flex items-center justify-between">
@@ -341,14 +541,17 @@ export default function AiExtractorPage() {
             <textarea
               value={rawText || ''}
               onChange={(e) => setRawText(e.target.value)}
-              placeholder="Paste raw LinkedIn hiring posts, recruiter updates, or job descriptions here (e.g. Riya.singh@ibotix.ai, hiring@karyah.app)..."
+              placeholder={`Paste one or multiple LinkedIn posts here.\nSeparate each post with --- (three dashes) for accurate results.\n\nExample:\nPost 1 content... apply@company1.com\n---\nPost 2 content... hr@company2.in\n---\nPost 3 content...`}
               rows={6}
               className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg p-3 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-[#89295E] resize-none font-sans leading-relaxed"
             />
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <span className="text-[10px] font-mono text-zinc-500">
-                AI extracts company, role, recruiter, and matches your 2 yrs React/Next.js stack + portfolio.
+                {hasPreferences
+                  ? `AI will generate emails as ${preferences.full_name || 'you'} — adapts to any job role.`
+                  : <span className="text-[#E8B54D]">⚠ Set your profile in ⚙️ Email Preferences above for best results.</span>
+                }
               </span>
 
               <button
@@ -634,6 +837,7 @@ export default function AiExtractorPage() {
                         {/* Open in Mail app */}
                         <a
                           href={mailtoUrl}
+                          onClick={() => { if (!isCompleted) toggleJobStatus(card.id); }}
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1F2329] hover:bg-[#282D35] text-zinc-200 border border-[#242930] hover:border-zinc-600 transition-colors"
                         >
                           <ExternalLink className="w-3 h-3 text-sky-400" />

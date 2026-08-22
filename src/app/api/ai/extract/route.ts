@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 
 export type ExtractedEntry = {
   name?: string;
@@ -23,6 +23,19 @@ export type JobApplicationCard = {
   body: string;
 };
 
+export type EmailPreferences = {
+  full_name?: string;
+  your_email?: string;
+  phone?: string;
+  portfolio_url?: string;
+  linkedin_url?: string;
+  your_role?: string;
+  experience?: string;
+  key_skills?: string;
+  example_subject?: string;
+  example_body?: string;
+};
+
 function cleanPhone(raw: string): string {
   let digits = raw.replace(/\D/g, '');
   if (digits.length === 10) {
@@ -33,8 +46,119 @@ function cleanPhone(raw: string): string {
   return digits;
 }
 
-// Fallback deterministic extractor
-function extractFallback(rawText: string) {
+function buildJobSystemPrompt(prefs: EmailPreferences): string {
+  const name = prefs.full_name?.trim() || 'the applicant';
+  const email = prefs.your_email?.trim() || '';
+  const phone = prefs.phone?.trim() || '';
+  const portfolio = prefs.portfolio_url?.trim() || '';
+  const linkedin = prefs.linkedin_url?.trim() || '';
+  const yourRole = prefs.your_role?.trim() || 'professional';
+  const exp = prefs.experience?.trim() || '';
+  const skills = prefs.key_skills?.trim() || '';
+  const exampleSubject = prefs.example_subject?.trim() || '';
+  const exampleBody = prefs.example_body?.trim() || '';
+
+  const signatureParts: string[] = [
+    'Best regards,',
+    name,
+  ];
+  if (phone) signatureParts.push(`Phone: ${phone}`);
+  if (linkedin) signatureParts.push(`LinkedIn: ${linkedin}`);
+  if (portfolio) signatureParts.push(`Portfolio: ${portfolio}`);
+  const signatureLines = signatureParts.join('\n');
+
+  const profileSection = [
+    'APPLICANT PROFILE:',
+    `- Name: ${name}`,
+    `- Email: ${email}`,
+    `- Phone: ${phone}`,
+    `- Role/Title: ${yourRole}`,
+    `- Experience: ${exp || 'professional experience'}`,
+    `- Skills: ${skills || 'relevant technical skills'}`,
+    `- Portfolio: ${portfolio}`,
+    `- LinkedIn: ${linkedin}`,
+  ].join('\n');
+
+  const exampleSection = exampleBody
+    ? `\nAPPLICANT EXAMPLE EMAIL STYLE (use as STYLE GUIDE only, adapt content for each job role and company):
+Example Subject: ${exampleSubject || 'Application for [Role] - ' + name}
+Example Body:
+${exampleBody}
+
+HOW TO ADAPT THIS EXAMPLE BODY:
+- The example body contains specific details like "React.js Developer position at your organization" or "Frontend Developer position". You must replace these with the actual role from the job post (e.g. "Backend Engineer position").
+- If the company name is available from the post, replace "your organization" with the company name (e.g., "apply for the Backend Engineer position at iBotix"). If the company is NOT specified, keep it general as "your organization" or "your company".
+- If the recruiter's name is known, start with "Hi [Recruiter Name],". If not, start with a polite fallback such as "Hi," or "Hi Hiring Team,".
+- NEVER output literal brackets like "[Company]", "[Role]", or "[Recruiter Name]" in the generated subject or body under any circumstances. If details are missing, use natural English fallbacks.`
+    : '';
+
+  return `You are an expert AI Job Application & Cold Outreach Assistant helping ${name} apply for jobs.
+
+${profileSection}
+${exampleSection}
+
+MULTIPLE POST PARSING:
+The user may paste multiple LinkedIn job posts in one message. Each individual post is SEPARATED by "---" (three dashes). Treat each section between "---" delimiters as a SEPARATE, INDEPENDENT job post and generate ONE cold email application card per post.
+If there is no "---" separator, try to detect individual posts by looking for new hiring announcements, company changes, or recruiter name changes.
+
+CRITICAL RULES FOR EMAIL EXTRACTION:
+1. STRICTLY DO NOT FABRICATE, INVENT, OR GUESS ANY EMAIL ADDRESSES.
+2. ONLY use the exact email address that is EXPLICITLY PRESENT in the input text for that specific post section.
+3. If a post section does not have a real email address explicitly written in it, DO NOT create a card for it.
+4. Use the context, company name, recruiter name, and job role found WITHIN THAT SAME POST SECTION to generate the customized subject and body. Do not mix details from different posts.
+
+ROLE ADAPTATION RULE (CRITICAL):
+- Read the job role from each LinkedIn post carefully (Backend Engineer, UI/UX Designer, Data Analyst, Full Stack Developer, etc.)
+- Adapt the skills paragraph to match WHAT THAT JOB REQUIRES based on the post details AND the applicant skills profile above.
+- If the applicant skills overlap with the job, highlight those. If the job needs something slightly different, frame the applicant skills in the most relevant way.
+- NEVER write a generic Frontend Developer email if the job is for a Backend role or any other role.
+
+SPAM AVOIDANCE - WITHIN-BATCH VARIATION (STRICT COMPLIANCE REQUIRED):
+When generating multiple cards in the same batch, you MUST vary the email content opening phrase. Use the following greetings sequentially:
+- For the first card (id: "app_1"), begin the body with: "I hope this message finds you well." (or "Hi [Recruiter Name], I hope this message finds you well.")
+- For the second card (id: "app_2"), begin the body with: "I came across your post on LinkedIn and was excited to apply."
+- For the third card (id: "app_3"), begin the body with: "I noticed you are actively hiring for this role and I would love to be considered."
+- For the fourth card (id: "app_4"), begin the body with: "I recently saw your job post and believe my background is a strong match."
+- If there are more cards, rotate these greetings in order.
+- Also, vary the sentence structures in the skills paragraph slightly by reordering skills or using synonyms so they do not look like a carbon copy.
+
+FORMATTING RULE FOR THE body FIELD:
+Format the email body with clear blank lines (double newlines) separating each paragraph:
+- Opening greeting line (e.g. "Hi Riya," or "Hi Hiring Team," - never literal brackets!)
+- 1-2 sentence intro about why applying and to which role at which company (or "your organization")
+- 2-3 sentence skills paragraph adapted to match the job post requirements
+- Closing line about attached resume
+
+Then the signature block.
+
+Return pure JSON in this exact structure:
+{
+  "applications": [
+    {
+      "id": "app_1",
+      "recruiter_name": "Recruiter or Poster Name or null",
+      "company": "Company Name or null",
+      "role": "Exact Role Title from the post or null",
+      "location": "Location if specified or null",
+      "experience": "Experience range if specified or null",
+      "skills": ["Skill1", "Skill2"],
+      "to_email": "exact_email_from_text@domain.com",
+      "phone": "Extracted phone with country code like 919978455050 if present, otherwise null",
+      "subject": "Tailored subject line using the applicant name and the actual job role (never leave literal brackets!)",
+      "body": "Clean multi-paragraph email body with blank lines between every section and the signature at end. Ensure there are absolutely no literal bracketed placeholders in the text."
+    }
+  ],
+  "emails": ["exact_email_from_text@domain.com"],
+  "phones": ["919978455050"],
+  "comma_separated": "exact_email_from_text@domain.com"
+}
+Ensure all to_emails are lowercase, valid, and strictly taken from the user input text.
+
+Signature to use at end of every email body:
+${signatureLines}`;
+}
+
+function extractFallback(rawText: string, prefs: EmailPreferences) {
   const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
   const phoneRegex = /(?:\+?(\d{1,3}))?[-. (]*(\d{3,5})[-. )]*(\d{3,5})[-. ]*(\d{3,5})/g;
 
@@ -61,28 +185,72 @@ function extractFallback(rawText: string) {
   for (const email of uniqueEmails) {
     const emailIndex = lines.findIndex(l => l.toLowerCase().includes(email));
     let name: string | undefined;
-
-    if (emailIndex >= 0) {
-      if (emailIndex >= 2 && !lines[emailIndex - 1].includes('@') && !lines[emailIndex - 2].includes('@')) {
-        name = `${lines[emailIndex - 2]} ${lines[emailIndex - 1]}`.trim();
-      } else if (emailIndex >= 1 && !lines[emailIndex - 1].includes('@')) {
-        name = lines[emailIndex - 1].trim();
-      }
+    if (emailIndex >= 2 && !lines[emailIndex - 1].includes('@') && !lines[emailIndex - 2].includes('@')) {
+      name = `${lines[emailIndex - 2]} ${lines[emailIndex - 1]}`.trim();
+    } else if (emailIndex >= 1 && !lines[emailIndex - 1].includes('@')) {
+      name = lines[emailIndex - 1].trim();
     }
-
-    entries.push({
-      email,
-      name: name || undefined,
-    });
+    entries.push({ email, name: name || undefined });
   }
 
-  // Fallback generated job cards
+  const yourName = prefs.full_name?.trim() || 'the applicant';
+  const yourRole = prefs.your_role?.trim() || 'Professional';
+  const skills = prefs.key_skills?.trim() || 'relevant technical skills';
+  const exp = prefs.experience?.trim() || 'professional experience';
+  const phone = prefs.phone?.trim() || '';
+  const linkedin = prefs.linkedin_url?.trim() || '';
+  const portfolio = prefs.portfolio_url?.trim() || '';
+  const yourEmail = prefs.your_email?.trim() || '';
+  const exampleBody = prefs.example_body?.trim();
+
+  const openings = [
+    "I hope this message finds you well.",
+    "I came across your post on LinkedIn and was excited to apply.",
+    "I noticed you are actively hiring for this role and I would love to be considered.",
+    "I recently saw your job post and believe my background is a strong match."
+  ];
+
   const applications: JobApplicationCard[] = uniqueEmails.map((email, idx) => {
+    const chosenOpening = openings[idx % openings.length];
+    
+    let baseBody = exampleBody ? exampleBody : '';
+
+    // If they supplied an example body, let's substitute the opener dynamically if it has standard greeting phrases
+    if (baseBody) {
+      // Find typical openings and swap them out to force variation in fallback
+      const matchRegex = /I hope (you are doing well|this finds you well|this message finds you well)\./gi;
+      if (matchRegex.test(baseBody)) {
+        baseBody = baseBody.replace(matchRegex, chosenOpening);
+      } else {
+        // If not found, prepended it
+        baseBody = chosenOpening + "\n\n" + baseBody;
+      }
+    } else {
+      baseBody = [
+        'Hi,',
+        '',
+        chosenOpening,
+        '',
+        `I am writing to apply for the ${yourRole} position. I have ${exp} of experience, specializing in ${skills}.`,
+        '',
+        'I have attached my resume for your review. I would appreciate the opportunity to discuss how my skills can contribute to your team.',
+        '',
+        'Thank you for your time and consideration. I look forward to hearing from you.',
+        '',
+        'Best regards,',
+        yourName,
+        phone ? `Phone: ${phone}` : '',
+        linkedin ? `LinkedIn: ${linkedin}` : '',
+        portfolio ? `Portfolio: ${portfolio}` : '',
+        yourEmail ? `Email: ${yourEmail}` : '',
+      ].filter((l, i, arr) => !(l === '' && arr[i - 1] === '')).join('\n').trimEnd();
+    }
+
     return {
       id: `app_${idx + 1}`,
       to_email: email,
-      subject: `Application for Frontend Developer Position - Prathamesh Mali`,
-      body: `Hi,\n\nI hope you are doing well.\n\nI am writing to apply for the Frontend Developer position. I have 2 years of professional experience in frontend development, specializing in React.js, Next.js, JavaScript, TypeScript, HTML5, CSS3, and responsive web development.\n\nI have built reusable UI components, integrated REST APIs, and collaborated with teams to deliver high-quality, scalable web applications with a strong focus on clean UI/UX.\n\nPortfolio: https://profile-inky-iota.vercel.app/\nLinkedIn: https://www.linkedin.com/in/prathamesh-mali-27685b236/\n\nI have attached my resume for your review. I would appreciate the opportunity to discuss how my skills and experience can contribute to your team.\n\nThank you for your time and consideration. I look forward to hearing from you.\n\nBest regards,\nPrathamesh Mali\nPhone: 7620537089\nEmail: maliprathamesh3162@gmail.com`
+      subject: `Application for ${yourRole} Position - ${yourName}`,
+      body: baseBody,
     };
   });
 
@@ -98,7 +266,8 @@ function extractFallback(rawText: string) {
 
 export async function POST(req: Request) {
   try {
-    const { text, apiKey, mode, customTemplate } = await req.json();
+    const { text, apiKey, mode, preferences } = await req.json();
+    const prefs: EmailPreferences = preferences || {};
 
     if (!text || typeof text !== 'string' || !text.trim()) {
       return NextResponse.json({ error: 'Text content is required' }, { status: 400 });
@@ -111,61 +280,7 @@ export async function POST(req: Request) {
         const isJobMode = mode === 'job_applications';
 
         const systemPrompt = isJobMode
-          ? `You are an expert AI Job Application & Cold Outreach Assistant for Prathamesh Mali, a Frontend Developer (React.js, Next.js, JavaScript, TypeScript, HTML, CSS, TailwindCSS, 2 years exp, Phone: 7620537089, Email: maliprathamesh3162@gmail.com, Portfolio: https://profile-inky-iota.vercel.app/, LinkedIn: https://www.linkedin.com/in/prathamesh-mali-27685b236/).
-
-Analyze the provided text which may contain ONE OR MULTIPLE LinkedIn hiring posts / job vacancies.
-
-CRITICAL RULES FOR EMAIL EXTRACTION:
-1. STRICTLY DO NOT FABRICATE, INVENT, OR GUESS ANY EMAIL ADDRESSES.
-2. ONLY use the exact email address that is EXPLICITLY PRESENT in the input text for that job post (e.g. maliprathamesh3162@gmail.com, Riya.singh@ibotix.ai, hiring@karyah.app).
-3. If a section or post does not have a real email address explicitly written in it, DO NOT create a card for it. Every application card MUST have a real "to_email" directly extracted from the text.
-4. Use the context, company name, recruiter name, and job role found around that exact email to generate the customized subject and body.
-
-CRITICAL FORMATTING RULE FOR THE "body" FIELD:
-DO NOT output a single block of text or compressed paragraph. You MUST format the email body with clear blank lines (double newlines \\n\\n) separating each paragraph and section, in this EXACT clean style:
-
-Hi [Recruiter Name or Hiring Team],
-
-I hope you are doing well.
-
-I am writing to apply for the [Job Role] position at [Company Name]. I have 2 years of professional experience in frontend development, specializing in React.js, Next.js, JavaScript, HTML, CSS, and responsive web development.
-
-In my current and previous projects, I have developed responsive and scalable web applications, built reusable UI components, integrated REST APIs, optimized application performance, and collaborated with teams to deliver high-quality user experiences. [Mention any matching specific skills from post like TypeScript/Angular/Redux/TailwindCSS if relevant].
-
-I have attached my resume for your review. I would appreciate the opportunity to discuss how my skills and experience can contribute to your team.
-
-Thank you for your time and consideration. I look forward to hearing from you.
-
-Best regards,
-Prathamesh Mali
-Phone: 7620537089
-LinkedIn: https://www.linkedin.com/in/prathamesh-mali-27685b236/
-Portfolio: https://profile-inky-iota.vercel.app/
-
-Return pure JSON in this exact structure:
-{
-  "applications": [
-    {
-      "id": "app_1",
-      "recruiter_name": "Recruiter or Poster Name (e.g. Riya Singh, Sirisha PV) or null",
-      "company": "Company Name (e.g. iBotix, karyah) or null",
-      "role": "Role Title (e.g. Frontend Developer, ReactJS Developer) or null",
-      "location": "Location if specified or null",
-      "experience": "Experience range if specified or null",
-      "skills": ["Skill1", "Skill2"],
-      "to_email": "exact_email_from_text@domain.com",
-      "phone": "Extracted phone number with country code like 919978455050 if present in this post, otherwise null",
-      "subject": "Tailored subject line (e.g. 'ReactJS - Prathamesh Mali' if post specifies a format, otherwise 'Application for [Role] Position - Prathamesh Mali')",
-      "body": "Clean multi-paragraph email body strictly formatted with \\n\\n between every section as shown above."
-    }
-  ],
-  "emails": ["exact_email_from_text@domain.com"],
-  "phones": ["919978455050"],
-  "comma_separated": "exact_email_from_text@domain.com"
-}
-Ensure all to_emails are lowercase, valid, and strictly taken from the user's input text.`
-
-
+          ? buildJobSystemPrompt(prefs)
           : `You are an expert data parsing assistant. Extract email addresses, phone numbers, and associated contact information (name, company, role, LinkedIn URL) from raw unstructured text.
 Return pure JSON:
 {
@@ -195,11 +310,11 @@ Return pure JSON:
             model: 'llama-3.3-70b-versatile',
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: text }
+              { role: 'user', content: text },
             ],
-            temperature: 0.1,
-            response_format: { type: 'json_object' }
-          })
+            temperature: 0.5,
+            response_format: { type: 'json_object' },
+          }),
         });
 
         if (groqResponse.ok) {
@@ -232,8 +347,7 @@ Return pure JSON:
       }
     }
 
-    // Fallback if no key or if Groq failed
-    const fallback = extractFallback(text);
+    const fallback = extractFallback(text, prefs);
     return NextResponse.json({
       success: true,
       source: 'regex-parser',
@@ -246,7 +360,8 @@ Return pure JSON:
       count: fallback.emails.length,
       phoneCount: fallback.phones.length,
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Extraction failed' }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Extraction failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

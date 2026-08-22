@@ -182,4 +182,27 @@ alter table job_applications enable row level security;
 create policy "Users manage own job applications" on job_applications
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ai_email_preferences table — stores per-user AI cold email generation profile
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists ai_email_preferences (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid references auth.users not null unique,
+  full_name       text not null default '',
+  your_email      text not null default '',
+  phone           text default '',
+  portfolio_url   text default '',
+  linkedin_url    text default '',
+  your_role       text default '',
+  experience      text default '',
+  key_skills      text default '',
+  example_subject text default '',
+  example_body    text default '',
+  updated_at      timestamptz default now(),
+  created_at      timestamptz default now()
+);
 
+alter table ai_email_preferences enable row level security;
+create policy "Users manage own ai email preferences" on ai_email_preferences
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
