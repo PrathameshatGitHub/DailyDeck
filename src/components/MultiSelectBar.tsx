@@ -1,15 +1,14 @@
 'use client';
 
-import { Trash2, CheckCircle2, X, Circle } from 'lucide-react';
+import { Trash2, CheckCircle2, Circle, Share2 } from 'lucide-react';
 
 interface MultiSelectBarProps {
   selectedCount: number;
   totalCount: number;
-  onSelectAll: () => void;
-  onClearAll: () => void;
   onMarkCompleted?: () => void;
   onMarkPending?: () => void;
   onDeleteSelected: () => void;
+  onShareSelected?: () => void;
   completedLabel?: string;
   pendingLabel?: string;
 }
@@ -17,11 +16,10 @@ interface MultiSelectBarProps {
 export function MultiSelectBar({
   selectedCount,
   totalCount,
-  onSelectAll,
-  onClearAll,
   onMarkCompleted,
   onMarkPending,
   onDeleteSelected,
+  onShareSelected,
   completedLabel = 'Mark Completed',
   pendingLabel = 'Mark Pending',
 }: MultiSelectBarProps) {
@@ -31,12 +29,6 @@ export function MultiSelectBar({
     <div className="sticky top-14 z-40 flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-[#1F2329] border border-[#89295E]/60 rounded-xl shadow-xl font-mono text-xs">
       <div className="flex items-center gap-3">
         <span className="text-[#ff8ac8] font-bold">{selectedCount} selected</span>
-        <button
-          onClick={selectedCount === totalCount ? onClearAll : onSelectAll}
-          className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2 text-[11px]"
-        >
-          {selectedCount === totalCount ? 'Deselect all' : `Select all ${totalCount}`}
-        </button>
       </div>
       <div className="flex items-center gap-2">
         {onMarkPending && (
@@ -57,6 +49,15 @@ export function MultiSelectBar({
             {completedLabel}
           </button>
         )}
+        {onShareSelected && (
+          <button
+            onClick={onShareSelected}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#ff8ac8]/10 hover:bg-[#ff8ac8]/20 text-[#ff8ac8] border border-[#ff8ac8]/30 font-bold text-[11px] transition-all"
+          >
+            <Share2 className="w-3 h-3" />
+            Share ({selectedCount})
+          </button>
+        )}
         <button
           onClick={onDeleteSelected}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-800/40 font-bold text-[11px] transition-all"
@@ -64,13 +65,7 @@ export function MultiSelectBar({
           <Trash2 className="w-3 h-3" />
           Delete ({selectedCount})
         </button>
-        <button
-          onClick={onClearAll}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-[#282D35] transition-colors"
-          title="Cancel selection"
-        >
-          <X className="w-4 h-4" />
-        </button>
+
       </div>
     </div>
   );

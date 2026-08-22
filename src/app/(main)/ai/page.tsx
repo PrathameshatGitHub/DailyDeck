@@ -38,7 +38,9 @@ import {
   ChevronDown,
   Save,
   User,
-  Link
+  Link,
+  Share2,
+  Download
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
@@ -66,6 +68,8 @@ export default function AiExtractorPage() {
     toggleStatus: toggleJobStatus,
     updateApplication: updateJobCardInDb,
     deleteApplication: deleteJobCardFromDb,
+    shareApplication,
+    importApplication,
   } = useJobApplications();
 
   // Mode: 'job_applications' (Default) or 'extractor'
@@ -104,6 +108,21 @@ export default function AiExtractorPage() {
   useEffect(() => {
     setLocalPrefs(preferences);
   }, [preferences]);
+
+  // Sharing states
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareCardId, setShareCardId] = useState('');
+  const [shareCardTitle, setShareCardTitle] = useState('');
+  const [sharePasscode, setSharePasscode] = useState('');
+  const [shareKeyResult, setShareKeyResult] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
+
+  // Importing states
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importShareKey, setImportShareKey] = useState('');
+  const [importPasscode, setImportPasscode] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
 
   // Load saved Groq API key from localStorage
   useEffect(() => {
@@ -309,6 +328,21 @@ export default function AiExtractorPage() {
               <span className="text-zinc-600">&bull;</span>
               <span className="text-[#7FE7C4] font-bold">{jobStats.completed} completed</span>
             </div>
+          )}
+          {activeTab === 'job_applications' && (
+            <button
+              onClick={() => {
+                setImportShareKey('');
+                setImportPasscode('');
+                setImportError('');
+                setIsImportModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+              title="Import a card shared by another account"
+            >
+              <Download className="w-3 h-3 text-[#ff8ac8]" />
+              <span>Import Shared Card</span>
+            </button>
           )}
           <button
             onClick={() => setShowKeyModal(true)}
@@ -692,6 +726,21 @@ export default function AiExtractorPage() {
                                   <span>Pending</span>
                                 </>
                               )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShareCardId(card.id);
+                                setShareCardTitle(`${card.role || 'Job'} @ ${card.company || card.to_email}`);
+                                setSharePasscode('');
+                                setShareKeyResult('');
+                                setIsShareModalOpen(true);
+                              }}
+                              className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-[#ff8ac8] transition-colors"
+                              title="Share card with password"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
                             </button>
 
                             <button
@@ -1253,6 +1302,212 @@ export default function AiExtractorPage() {
               >
                 Save Key
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Job Application Card Modal */}
+      {isShareModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsShareModalOpen(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#15181D] border border-[#242930] rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150 font-mono"
+          >
+            <div className="flex items-center justify-between border-b border-[#242930] pb-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-200 font-bold uppercase tracking-wider">
+                <Share2 className="w-4 h-4 text-[#ff8ac8]" />
+                <span>Share Cold Outreach Card</span>
+              </div>
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+              Sharing card for: <strong className="text-zinc-200 font-mono">{shareCardTitle}</strong>. 
+              Anyone with the generated <strong className="text-[#ff8ac8]">Share Key</strong> and passcode can import a copy of this card.
+            </div>
+
+            {!shareKeyResult ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                    Set Passcode / Password
+                  </label>
+                  <input
+                    type="text"
+                    value={sharePasscode}
+                    onChange={(e) => setSharePasscode(e.target.value)}
+                    placeholder="e.g. 1234 or team_pass"
+                    className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-[#89295E] select-all font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => setIsShareModalOpen(false)}
+                    className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={shareLoading || !sharePasscode.trim()}
+                    onClick={async () => {
+                      setShareLoading(true);
+                      const key = await shareApplication(shareCardId, sharePasscode);
+                      setShareLoading(false);
+                      if (key) {
+                        setShareKeyResult(key);
+                        showNotification('Share link generated!');
+                      } else {
+                        showNotification('Failed to generate share link.');
+                      }
+                    }}
+                    className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"
+                  >
+                    {shareLoading ? 'Generating...' : 'Generate Share Code'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-[#0D0F12] border border-[#242930] p-3 rounded-lg space-y-2.5">
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Share Key</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-[#7FE7C4] font-bold font-mono select-all">{shareKeyResult}</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareKeyResult);
+                            showNotification('Share Key copied!');
+                          } catch {}
+                        }}
+                        className="px-2 py-0.5 rounded bg-[#1F2329] border border-[#242930] hover:text-zinc-200 text-[10px] text-zinc-400 transition-colors"
+                      >
+                        Copy Key
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Required Passcode</label>
+                    <span className="text-xs text-zinc-300 font-bold font-mono">{sharePasscode}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => setIsShareModalOpen(false)}
+                    className="px-4 py-1.5 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 text-xs font-bold"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Import Shared Job Application Card Modal */}
+      {isImportModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsImportModalOpen(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#15181D] border border-[#242930] rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150 font-mono"
+          >
+            <div className="flex items-center justify-between border-b border-[#242930] pb-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-200 font-bold uppercase tracking-wider">
+                <Download className="w-4 h-4 text-[#ff8ac8]" />
+                <span>Import Shared outreach Card</span>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+              Enter the Share Key and passcode supplied by the card owner to import a copy into your list.
+            </p>
+
+            {importError && (
+              <div className="p-2 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] text-red-400">
+                Error: {importError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Share Key (e.g. app-xxxxxx)
+                </label>
+                <input
+                  type="text"
+                  value={importShareKey}
+                  onChange={(e) => setImportShareKey(e.target.value)}
+                  placeholder="app-xxxxxx"
+                  className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-[#89295E] font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Enter Passcode
+                </label>
+                <input
+                  type="password"
+                  value={importPasscode}
+                  onChange={(e) => setImportPasscode(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-[#89295E] font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242930]">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={importLoading || !importShareKey.trim() || !importPasscode.trim()}
+                  onClick={async () => {
+                    setImportLoading(true);
+                    setImportError('');
+                    const success = await importApplication(importShareKey, importPasscode);
+                    setImportLoading(false);
+                    if (success) {
+                      showNotification('✓ Shared outreach card imported successfully!');
+                      setIsImportModalOpen(false);
+                    } else {
+                      setImportError('Invalid Share Key, incorrect passcode, or the card was deleted.');
+                    }
+                  }}
+                  className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"
+                >
+                  {importLoading ? 'Importing...' : 'Import outreach Card'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

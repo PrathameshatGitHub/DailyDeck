@@ -206,3 +206,161 @@ create table if not exists ai_email_preferences (
 alter table ai_email_preferences enable row level security;
 create policy "Users manage own ai email preferences" on ai_email_preferences
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- job_shares table & import RPC — passcode-protected job card sharing
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists job_shares (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid references auth.users not null,
+  card_id     uuid references job_applications on delete cascade not null,
+  share_key   text unique not null,
+  passcode    text not null,
+  created_at  timestamptz default now()
+);
+
+alter table job_shares enable row level security;
+
+create policy "Users manage own job shares" on job_shares
+  for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+
+-- RPC Function to safely import a shared card bypassing RLS boundaries
+create or replace function import_shared_card(
+  p_share_key text,
+  p_passcode text,
+  p_importer_id uuid
+)
+returns jsonb
+language plpgsql
+security definer -- runs with admin privileges to read owner's card and copy it
+as $$
+declare
+  v_card_id uuid;
+  v_new_card_id uuid;
+  v_recruiter_name text;
+  v_company text;
+  v_role text;
+  v_location text;
+  v_experience text;
+  v_skills text[];
+  v_to_email text;
+  v_phone text;
+  v_subject text;
+  v_body text;
+begin
+  -- 1. Check share key and passcode
+  select card_id into v_card_id
+  from job_shares
+  where share_key = p_share_key and passcode = p_passcode;
+
+  if not found then
+    raise exception 'Invalid Share Key or Passcode';
+  end if;
+
+  -- 2. Fetch original card details
+  select recruiter_name, company, role, location, experience, skills, to_email, phone, subject, body
+  into v_recruiter_name, v_company, v_role, v_location, v_experience, v_skills, v_to_email, v_phone, v_subject, v_body
+  from job_applications
+  where id = v_card_id;
+
+  if not found then
+    raise exception 'Original job card no longer exists';
+  end if;
+
+  -- 3. Insert copy for importer
+  insert into job_applications (
+    user_id, recruiter_name, company, role, location, experience, skills, to_email, phone, subject, body, status
+  ) values (
+    p_importer_id, v_recruiter_name, v_company, v_role, v_location, v_experience, v_skills, v_to_email, v_phone, v_subject, v_body, 'pending'
+  )
+  returning id into v_new_card_id;
+
+  return jsonb_build_object(
+    'success', true,
+    'new_card_id', v_new_card_id
+  );
+end;
+$$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- email_shares & email_share_items — bulk sharing email templates
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists email_shares (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid references auth.users not null,
+  owner_name  text not null,
+  share_key   text unique not null,
+  passcode    text not null,
+  created_at  timestamptz default now()
+);
+
+create table if not exists email_share_items (
+  id          uuid primary key default gen_random_uuid(),
+  share_id    uuid references email_shares(id) on delete cascade not null,
+  title       text not null,
+  category    text,
+  content     text not null
+);
+
+alter table email_shares enable row level security;
+alter table email_share_items enable row level security;
+
+create policy "Users manage own email shares" on email_shares
+  for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+
+create policy "Users manage own email share items" on email_share_items
+  for all using (
+    exists (
+      select 1 from email_shares where id = email_share_items.share_id and owner_id = auth.uid()
+    )
+  );
+
+-- RPC Function to safely import bulk email templates bypassing RLS boundaries
+create or replace function import_shared_emails(
+  p_share_key text,
+  p_passcode text,
+  p_importer_id uuid
+)
+returns jsonb
+language plpgsql
+security definer -- runs with administrative privileges to duplicate emails safely
+as $$
+declare
+  v_share_id uuid;
+  v_owner_name text;
+  v_item record;
+  v_imported_count integer := 0;
+begin
+  -- 1. Check share key and passcode
+  select id, owner_name into v_share_id, v_owner_name
+  from email_shares
+  where share_key = p_share_key and passcode = p_passcode;
+
+  if not found then
+    raise exception 'Invalid Share Key or Passcode';
+  end if;
+
+  -- 2. Loop and duplicate each template card under importer's user_id
+  for v_item in 
+    select title, category, content
+    from email_share_items
+    where share_id = v_share_id
+  loop
+    insert into emails (
+      user_id, title, category, content, status
+    ) values (
+      p_importer_id, v_item.title, v_item.category, v_item.content, 'pending'
+    );
+    v_imported_count := v_imported_count + 1;
+  end loop;
+
+  return jsonb_build_object(
+    'success', true,
+    'owner_name', v_owner_name,
+    'imported_count', v_imported_count
+  );
+end;
+$$;

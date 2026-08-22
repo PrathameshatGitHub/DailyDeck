@@ -196,6 +196,60 @@ export function useJobApplications() {
     } catch {}
   };
 
+  const shareApplication = async (cardId: string, passcode: string): Promise<string | null> => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) return null;
+
+      // Generate a short readable random key
+      const randHex = Math.random().toString(36).substring(2, 8);
+      const shareKey = `app-${randHex}`;
+
+      const { error } = await supabase
+        .from('job_shares')
+        .insert({
+          owner_id: userData.user.id,
+          card_id: cardId,
+          share_key: shareKey,
+          passcode: passcode,
+        });
+
+      if (error) {
+        console.error('Failed to create job share:', error.message);
+        return null;
+      }
+      return shareKey;
+    } catch (err) {
+      console.error('Share application error:', err);
+      return null;
+    }
+  };
+
+  const importApplication = async (shareKey: string, passcode: string): Promise<boolean> => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) return false;
+
+      const { data, error } = await supabase.rpc('import_shared_card', {
+        p_share_key: shareKey.trim(),
+        p_passcode: passcode.trim(),
+        p_importer_id: userData.user.id,
+      });
+
+      if (error || !data) {
+        console.error('Failed to import shared card:', error?.message);
+        return false;
+      }
+
+      // Refresh applications from database
+      await fetchApplications();
+      return true;
+    } catch (err) {
+      console.error('Import application error:', err);
+      return false;
+    }
+  };
+
   // Sort applications: Pending on top (0), Completed at bottom (1), then newest first
   const sortedApplications = [...applications].sort((a, b) => {
     const aOrder = a.status === 'pending' ? 0 : 1;
@@ -220,5 +274,7 @@ export function useJobApplications() {
     updateApplication,
     deleteApplication,
     fetchApplications,
+    shareApplication,
+    importApplication,
   };
 }

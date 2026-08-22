@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useEmails, type Email } from '@/lib/hooks/useEmails';
 import { MultiSelectBar } from '@/components/MultiSelectBar';
-import { Copy, Plus, Trash2, CopyPlus, Search, CheckCircle2, Circle, Clock, Mail } from 'lucide-react';
+import { Copy, Plus, Trash2, CopyPlus, Search, CheckCircle2, Circle, Clock, Mail, Share2, Download, KeyRound, Lock } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function EmailsPage() {
-  const { emails, loading, addEmail, updateEmail, deleteEmail, duplicateEmail } = useEmails();
+  const { emails, loading, addEmail, updateEmail, deleteEmail, duplicateEmail, shareEmails, importEmails } = useEmails();
   
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
@@ -19,6 +19,20 @@ export default function EmailsPage() {
 
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+  // Bulk Sharing states
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [sharePasscode, setSharePasscode] = useState('');
+  const [shareKeyResult, setShareKeyResult] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
+
+  // Importing states
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importShareKey, setImportShareKey] = useState('');
+  const [importPasscode, setImportPasscode] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
 
   // New Email Form State
   const [newTitle, setNewTitle] = useState('');
@@ -73,6 +87,11 @@ export default function EmailsPage() {
   const completedCount = emails.filter(e => e.status === 'completed').length;
 
   const toggleSelect = (id: string) => {
+    // Auto-enter selection mode if not already in it
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+    
     setSelectedIds(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -80,25 +99,34 @@ export default function EmailsPage() {
     });
   };
 
-  const selectAll = () => setSelectedIds(new Set(displayedEmails.map(e => e.id)));
-  const clearSelection = () => setSelectedIds(new Set());
+  const selectAll = () => {
+    setIsSelectionMode(true);
+    setSelectedIds(new Set(displayedEmails.map(e => e.id)));
+  };
+  
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
 
   const handleBulkMarkCompleted = async () => {
     await Promise.all([...selectedIds].map(id => updateEmail(id, { status: 'completed' })));
     showToast(`${selectedIds.size} templates marked completed`);
     clearSelection();
+    setIsSelectionMode(false);
   };
 
   const handleBulkMarkPending = async () => {
     await Promise.all([...selectedIds].map(id => updateEmail(id, { status: 'pending' })));
     showToast(`${selectedIds.size} templates marked pending`);
     clearSelection();
+    setIsSelectionMode(false);
   };
 
   const handleBulkDelete = async () => {
     await Promise.all([...selectedIds].map(id => deleteEmail(id)));
     showToast(`${selectedIds.size} templates deleted`);
     clearSelection();
+    setIsSelectionMode(false);
     setConfirmBulkDelete(false);
   };
 
@@ -120,19 +148,77 @@ export default function EmailsPage() {
             {pendingCount} pending &bull; {completedCount} completed &bull; {emails.length} total
           </span>
         </div>
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest">templates_active</div>
+        <div className="flex items-center gap-2">
+          {isSelectionMode ? (
+            <>
+              <button
+                onClick={() => {
+                  const allSelected = selectedIds.size === displayedEmails.length;
+                  if (allSelected) {
+                    clearSelection();
+                  } else {
+                    selectAll();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-[#1F2329] text-zinc-300 hover:bg-[#282D35] transition-colors w-fit"
+              >
+                <div className={`w-3 h-3 rounded border flex items-center justify-center ${
+                  selectedIds.size === displayedEmails.length ? 'bg-[#89295E] border-[#89295E]' : 'border-zinc-600'
+                }`}>
+                  {selectedIds.size === displayedEmails.length && <span className="text-white text-[8px] font-bold">✓</span>}
+                </div>
+                <span>{selectedIds.size === displayedEmails.length ? 'Deselect All' : 'Select All'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsSelectionMode(false);
+                  clearSelection();
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-[#1F2329] text-zinc-300 hover:bg-[#282D35] transition-colors w-fit"
+              >
+                <span>Cancel Selection</span>
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setIsSelectionMode(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-[#1F2329] text-zinc-300 hover:bg-[#282D35] transition-colors w-fit"
+            >
+              <span>Select</span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setImportShareKey('');
+              setImportPasscode('');
+              setImportError('');
+              setIsImportModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-[#1F2329] text-zinc-300 hover:bg-[#282D35] transition-colors w-fit"
+            title="Import shared templates bundle"
+          >
+            <Download className="w-3 h-3 text-[#ff8ac8]" />
+            <span>Import Shared Templates</span>
+          </button>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest hidden sm:block">templates_active</div>
+        </div>
       </div>
 
       {/* Multi-Select Bar */}
-      <MultiSelectBar
-        selectedCount={selectedIds.size}
-        totalCount={displayedEmails.length}
-        onSelectAll={selectAll}
-        onClearAll={clearSelection}
-        onMarkCompleted={handleBulkMarkCompleted}
-        onMarkPending={handleBulkMarkPending}
-        onDeleteSelected={() => setConfirmBulkDelete(true)}
-      />
+      {selectedIds.size > 0 && (
+        <MultiSelectBar
+          selectedCount={selectedIds.size}
+          totalCount={displayedEmails.length}
+          onMarkCompleted={handleBulkMarkCompleted}
+          onMarkPending={handleBulkMarkPending}
+          onDeleteSelected={() => setConfirmBulkDelete(true)}
+          onShareSelected={() => {
+            setSharePasscode('');
+            setShareKeyResult('');
+            setIsShareModalOpen(true);
+          }}
+        />
+      )}
 
       {/* Creation Form */}
       <form onSubmit={handleCreate} className="flex flex-wrap gap-3 bg-[#15181D] p-3 border border-[#242930] rounded">
@@ -214,6 +300,7 @@ export default function EmailsPage() {
             onCopy={showToast}
             isSelected={selectedIds.has(email.id)}
             onToggleSelect={toggleSelect}
+            showCheckbox={isSelectionMode}
           />
         ))}
 
@@ -247,6 +334,216 @@ export default function EmailsPage() {
         onConfirm={handleBulkDelete}
         onCancel={() => setConfirmBulkDelete(false)}
       />
+
+      {/* Share Email Templates Modal */}
+      {isShareModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 font-mono"
+          onClick={() => setIsShareModalOpen(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#15181D] border border-[#242930] rounded-xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between border-b border-[#242930] pb-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-200 font-bold uppercase tracking-wider">
+                <Share2 className="w-4 h-4 text-[#ff8ac8]" />
+                <span>Share Templates Bundle</span>
+              </div>
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+              Sharing a bundle of <strong className="text-zinc-200 font-mono">{selectedIds.size} email templates</strong>. 
+              Anyone with the generated <strong className="text-[#ff8ac8]">Share Key</strong> and passcode can import copies of these templates into their project.
+            </div>
+
+            {!shareKeyResult ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                    Set Passcode / Password
+                  </label>
+                  <input
+                    type="text"
+                    value={sharePasscode}
+                    onChange={(e) => setSharePasscode(e.target.value)}
+                    placeholder="e.g. 1234 or team_pass"
+                    className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-650 outline-none focus:border-[#89295E] select-all font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => setIsShareModalOpen(false)}
+                    className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={shareLoading || !sharePasscode.trim()}
+                    onClick={async () => {
+                      setShareLoading(true);
+                      const key = await shareEmails(Array.from(selectedIds), sharePasscode);
+                      setShareLoading(false);
+                      if (key) {
+                        setShareKeyResult(key);
+                        showToast('Templates shared successfully!');
+                      } else {
+                        showToast('Failed to create shared templates.');
+                      }
+                    }}
+                    className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"
+                  >
+                    {shareLoading ? 'Sharing...' : 'Share Templates'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-[#0D0F12] border border-[#242930] p-3 rounded-lg space-y-2.5">
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Share Key</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-[#7FE7C4] font-bold font-mono select-all">{shareKeyResult}</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareKeyResult);
+                            showToast('Share Key copied!');
+                          } catch {}
+                        }}
+                        className="px-2 py-0.5 rounded bg-[#1F2329] border border-[#242930] hover:text-zinc-200 text-[10px] text-zinc-400 transition-colors"
+                      >
+                        Copy Key
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Required Passcode</label>
+                    <span className="text-xs text-zinc-300 font-bold font-mono">{sharePasscode}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsShareModalOpen(false);
+                      clearSelection();
+                      setIsSelectionMode(false);
+                    }}
+                    className="px-4 py-1.5 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 text-xs font-bold"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Import Shared Email Templates Modal */}
+      {isImportModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 font-mono"
+          onClick={() => setIsImportModalOpen(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#15181D] border border-[#242930] rounded-xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between border-b border-[#242930] pb-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-200 font-bold uppercase tracking-wider">
+                <Download className="w-4 h-4 text-[#ff8ac8]" />
+                <span>Import Templates Bundle</span>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+              Enter the Share Key and passcode of the shared bundle to import them into your email templates list.
+            </p>
+
+            {importError && (
+              <div className="p-2 bg-red-950/30 border border-red-900/50 rounded-lg text-[10px] text-red-400">
+                Error: {importError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Share Key (e.g. share-xxxxxx)
+                </label>
+                <input
+                  type="text"
+                  value={importShareKey}
+                  onChange={(e) => setImportShareKey(e.target.value)}
+                  placeholder="share-xxxxxx"
+                  className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-650 outline-none focus:border-[#89295E] font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Enter Passcode
+                </label>
+                <input
+                  type="password"
+                  value={importPasscode}
+                  onChange={(e) => setImportPasscode(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-650 outline-none focus:border-[#89295E] font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242930]">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={importLoading || !importShareKey.trim() || !importPasscode.trim()}
+                  onClick={async () => {
+                    setImportLoading(true);
+                    setImportError('');
+                    const result = await importEmails(importShareKey, importPasscode);
+                    setImportLoading(false);
+                    if (result.success) {
+                      showToast(`✓ Imported ${result.count} template${(result.count || 0) > 1 ? 's' : ''} shared by ${result.ownerName}!`);
+                      setIsImportModalOpen(false);
+                    } else {
+                      setImportError('Invalid Share Key, incorrect passcode, or the templates were deleted.');
+                    }
+                  }}
+                  className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"
+                >
+                  {importLoading ? 'Importing...' : 'Import Templates'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -259,6 +556,7 @@ function EmailCard({
   onCopy,
   isSelected,
   onToggleSelect,
+  showCheckbox,
 }: { 
   email: Email, 
   onUpdate: (id: string, updates: Partial<Email>) => void,
@@ -267,6 +565,7 @@ function EmailCard({
   onCopy: (msg: string) => void,
   isSelected: boolean,
   onToggleSelect: (id: string) => void,
+  showCheckbox: boolean,
 }) {
   const isCompleted = email.status === 'completed';
   
@@ -296,7 +595,7 @@ function EmailCard({
   return (
     <div
       className={`flex flex-col bg-[#15181D] border rounded-2xl overflow-hidden transition-all ${
-        isSelected
+        isSelected && showCheckbox
           ? 'border-[#89295E] ring-2 ring-[#89295E]/30'
           : isCompleted ? 'border-[#7FE7C4]/30' : 'border-[#242930] hover:border-zinc-700/80'
       }`}
@@ -304,17 +603,19 @@ function EmailCard({
       {/* Header */}
       <div className="p-4 border-b border-[#242930] flex flex-wrap items-start justify-between gap-3 bg-[#0D0F12]/30">
         <div className="flex items-start gap-2 flex-1 min-w-0">
-          {/* Checkbox for multi-select */}
-          <button
-            onClick={() => onToggleSelect(email.id)}
-            className={`mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
-              isSelected
-                ? 'bg-[#89295E] border-[#89295E]'
-                : 'border-zinc-600 hover:border-[#89295E]'
-            }`}
-          >
-            {isSelected && <span className="text-white text-[8px] font-bold">✓</span>}
-          </button>
+          {/* Checkbox for multi-select - only show when in selection mode */}
+          {showCheckbox && (
+            <button
+              onClick={() => onToggleSelect(email.id)}
+              className={`mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                isSelected
+                  ? 'bg-[#89295E] border-[#89295E]'
+                  : 'border-zinc-600'
+              }`}
+            >
+              {isSelected && <span className="text-white text-[8px] font-bold">✓</span>}
+            </button>
+          )}
           <div className="flex-1 min-w-0 space-y-2">
             <input 
               value={email.title || ''}
