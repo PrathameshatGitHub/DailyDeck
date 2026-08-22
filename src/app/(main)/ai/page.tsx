@@ -43,6 +43,7 @@ import {
   Download
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { MultiSelectBar } from '@/components/MultiSelectBar';
 
 interface ExtractedEntry {
   name?: string;
@@ -70,6 +71,8 @@ export default function AiExtractorPage() {
     deleteApplication: deleteJobCardFromDb,
     shareApplication,
     importApplication,
+    shareJobApplications,
+    importJobApplications,
   } = useJobApplications();
 
   // Mode: 'job_applications' (Default) or 'extractor'
@@ -116,6 +119,14 @@ export default function AiExtractorPage() {
   const [sharePasscode, setSharePasscode] = useState('');
   const [shareKeyResult, setShareKeyResult] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
+
+  // Bulk Sharing states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isBulkShareModalOpen, setIsBulkShareModalOpen] = useState(false);
+  const [bulkSharePasscode, setBulkSharePasscode] = useState('');
+  const [bulkShareKeyResult, setBulkShareKeyResult] = useState('');
+  const [bulkShareLoading, setBulkShareLoading] = useState(false);
 
   // Importing states
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -280,6 +291,53 @@ export default function AiExtractorPage() {
     return matchSearch && matchStatus;
   });
 
+  // Selection handlers
+  const toggleSelect = (id: string) => {
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+    
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setIsSelectionMode(true);
+    setSelectedIds(new Set(filteredJobCards.map(card => card.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkShare = async () => {
+    setBulkShareLoading(true);
+    const key = await shareJobApplications(Array.from(selectedIds), bulkSharePasscode);
+    setBulkShareLoading(false);
+    if (key) {
+      setBulkShareKeyResult(key);
+      showNotification('Job cards bundle shared successfully!');
+    } else {
+      showNotification('Failed to create shared bundle.');
+    }
+  };
+
+  const handleBulkImport = async () => {
+    setImportLoading(true);
+    setImportError('');
+    const result = await importJobApplications(importShareKey, importPasscode);
+    setImportLoading(false);
+    if (result.success) {
+      showNotification(`✓ Imported ${result.count} job card${(result.count || 0) > 1 ? 's' : ''} shared by ${result.ownerName}!`);
+      setIsImportModalOpen(false);
+    } else {
+      setImportError('Invalid Share Key, incorrect passcode, or the bundle was deleted.');
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto font-sans pb-16 relative">
       {/* Toast Notification */}
@@ -330,19 +388,59 @@ export default function AiExtractorPage() {
             </div>
           )}
           {activeTab === 'job_applications' && (
-            <button
-              onClick={() => {
-                setImportShareKey('');
-                setImportPasscode('');
-                setImportError('');
-                setIsImportModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
-              title="Import a card shared by another account"
-            >
-              <Download className="w-3 h-3 text-[#ff8ac8]" />
-              <span>Import Shared Card</span>
-            </button>
+            <>
+              {isSelectionMode ? (
+                <>
+                  <button
+                    onClick={() => {
+                      const allSelected = selectedIds.size === filteredJobCards.length;
+                      if (allSelected) {
+                        clearSelection();
+                      } else {
+                        selectAll();
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                  >
+                    <div className={`w-3 h-3 rounded border flex items-center justify-center ${
+                      selectedIds.size === filteredJobCards.length ? 'bg-[#89295E] border-[#89295E]' : 'border-zinc-600'
+                    }`}>
+                      {selectedIds.size === filteredJobCards.length && <span className="text-white text-[8px] font-bold">✓</span>}
+                    </div>
+                    <span>{selectedIds.size === filteredJobCards.length ? 'Deselect All' : 'Select All'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsSelectionMode(false);
+                      clearSelection();
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                  >
+                    <span>Cancel Selection</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setIsSelectionMode(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                >
+                  <span>Select</span>
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setImportShareKey('');
+                  setImportPasscode('');
+                  setImportError('');
+                  setIsImportModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                title="Import shared cards/bundle"
+              >
+                <Download className="w-3 h-3 text-[#ff8ac8]" />
+                <span>Import Shared</span>
+              </button>
+            </>
           )}
           <button
             onClick={() => setShowKeyModal(true)}
@@ -609,6 +707,59 @@ export default function AiExtractorPage() {
             </div>
           </div>
 
+          {/* Multi-Select Bar */}
+          {selectedIds.size > 0 && (
+            <MultiSelectBar
+              selectedCount={selectedIds.size}
+              totalCount={filteredJobCards.length}
+              onMarkCompleted={async () => {
+                await Promise.all([...selectedIds].map(id => toggleJobStatus(id)));
+                showNotification(`${selectedIds.size} cards marked completed`);
+                clearSelection();
+                setIsSelectionMode(false);
+              }}
+              onMarkPending={async () => {
+                await Promise.all([...selectedIds].map(id => toggleJobStatus(id)));
+                showNotification(`${selectedIds.size} cards marked pending`);
+                clearSelection();
+                setIsSelectionMode(false);
+              }}
+              onDeleteSelected={async () => {
+                await Promise.all([...selectedIds].map(id => deleteJobCardFromDb(id)));
+                showNotification(`${selectedIds.size} cards deleted`);
+                clearSelection();
+                setIsSelectionMode(false);
+              }}
+              onShareSelected={() => {
+                setBulkSharePasscode('');
+                setBulkShareKeyResult('');
+                setIsBulkShareModalOpen(true);
+              }}
+            />
+          )}
+
+          {/* Action Bar: Copy All Emails from Existing Cards */}
+          {savedJobCards.length > 0 && (
+            <div className="flex items-center justify-between bg-[#15181D] border border-[#242930] rounded-xl p-3">
+              <div className="flex items-center gap-2 font-mono text-xs text-zinc-400">
+                <Mail className="w-3.5 h-3.5 text-[#7FE7C4]" />
+                <span className="font-bold">All Emails from Cards:</span>
+                <span className="text-zinc-200">{savedJobCards.length} cards</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const allEmails = savedJobCards.map(card => card.to_email).filter(email => email).join(', ');
+                  copyToClipboard(allEmails, 'all-cards', 'email', 'All Card Emails');
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-colors"
+              >
+                <Copy className="w-4 h-4" />
+                <span>Copy All Emails</span>
+              </button>
+            </div>
+          )}
+
           {/* Search & Filter Bar for Generated Cards */}
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1 bg-[#15181D] border border-[#242930] rounded-xl flex items-center px-3.5 py-2 focus-within:border-[#89295E]/60 transition-colors">
@@ -677,11 +828,15 @@ export default function AiExtractorPage() {
                   // mailto link
                   const mailtoUrl = `mailto:${card.to_email}?subject=${encodeURIComponent(card.subject || '')}&body=${encodeURIComponent(card.body || '')}`;
 
+                  const isSelected = selectedIds.has(card.id);
+
                   return (
                     <div
                       key={card.id}
                       className={`bg-[#15181D] border rounded-2xl p-4.5 space-y-3.5 shadow-md flex flex-col justify-between transition-all duration-150 ${
-                        isCompleted
+                        isSelected && isSelectionMode
+                          ? 'border-[#89295E] ring-2 ring-[#89295E]/30'
+                          : isCompleted
                           ? 'border-[#242930] opacity-80 hover:opacity-100'
                           : 'border-[#89295E]/40 hover:border-[#89295E]/80'
                       }`}
@@ -689,6 +844,19 @@ export default function AiExtractorPage() {
                       {/* Top Header: Company, Recruiter, Role, Status Button */}
                       <div className="space-y-1.5 pb-2.5 border-b border-[#242930]">
                         <div className="flex items-start justify-between gap-2">
+                          {/* Checkbox for multi-select */}
+                          {isSelectionMode && (
+                            <button
+                              onClick={() => toggleSelect(card.id)}
+                              className={`mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                                isSelected
+                                  ? 'bg-[#89295E] border-[#89295E]'
+                                  : 'border-zinc-600'
+                              }`}
+                            >
+                              {isSelected && <span className="text-white text-[8px] font-bold">✓</span>}
+                            </button>
+                          )}
                           <div className="min-w-0 flex-1">
                             <h3 className={`text-sm font-bold truncate ${isCompleted ? 'text-zinc-400 line-through' : 'text-zinc-100'}`}>
                               <span>{card.role || 'Frontend Developer'}</span>
@@ -1420,6 +1588,113 @@ export default function AiExtractorPage() {
         </div>
       )}
 
+      {/* Bulk Share Job Application Cards Modal */}
+      {isBulkShareModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsBulkShareModalOpen(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#15181D] border border-[#242930] rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150 font-mono"
+          >
+            <div className="flex items-center justify-between border-b border-[#242930] pb-3">
+              <div className="flex items-center gap-2 text-xs text-zinc-200 font-bold uppercase tracking-wider">
+                <Share2 className="w-4 h-4 text-[#ff8ac8]" />
+                <span>Share Job Cards Bundle</span>
+              </div>
+              <button
+                onClick={() => setIsBulkShareModalOpen(false)}
+                className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+              Sharing a bundle of <strong className="text-zinc-200 font-mono">{selectedIds.size} job application cards</strong>. 
+              Anyone with the generated <strong className="text-[#ff8ac8]">Share Key</strong> and passcode can import copies of these cards.
+            </div>
+
+            {!bulkShareKeyResult ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="block text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                    Set Passcode / Password
+                  </label>
+                  <input
+                    type="text"
+                    value={bulkSharePasscode}
+                    onChange={(e) => setBulkSharePasscode(e.target.value)}
+                    placeholder="e.g. 1234 or team_pass"
+                    className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-[#89295E] select-all font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkShareModalOpen(false)}
+                    className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkShareLoading || !bulkSharePasscode.trim()}
+                    onClick={handleBulkShare}
+                    className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"
+                  >
+                    {bulkShareLoading ? 'Sharing...' : 'Share Bundle'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-[#0D0F12] border border-[#242930] p-3 rounded-lg space-y-2.5">
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Share Key</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-[#7FE7C4] font-bold font-mono select-all">{bulkShareKeyResult}</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(bulkShareKeyResult);
+                            showNotification('Share Key copied!');
+                          } catch {}
+                        }}
+                        className="px-2 py-0.5 rounded bg-[#1F2329] border border-[#242930] hover:text-zinc-200 text-[10px] text-zinc-400 transition-colors"
+                      >
+                        Copy Key
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Required Passcode</label>
+                    <span className="text-xs text-zinc-300 font-bold font-mono">{bulkSharePasscode}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end pt-2 border-t border-[#242930]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsBulkShareModalOpen(false);
+                      clearSelection();
+                      setIsSelectionMode(false);
+                    }}
+                    className="px-4 py-1.5 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 text-xs font-bold"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Import Shared Job Application Card Modal */}
       {isImportModalOpen && (
         <div 
@@ -1444,7 +1719,7 @@ export default function AiExtractorPage() {
             </div>
 
             <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
-              Enter the Share Key and passcode supplied by the card owner to import a copy into your list.
+              Enter the Share Key and passcode to import shared job cards (single card or bundle).
             </p>
 
             {importError && (
@@ -1494,13 +1769,24 @@ export default function AiExtractorPage() {
                   onClick={async () => {
                     setImportLoading(true);
                     setImportError('');
-                    const success = await importApplication(importShareKey, importPasscode);
+                    
+                    // Try bundle import first (for new bulk sharing)
+                    let result = await importJobApplications(importShareKey, importPasscode);
+                    
+                    // If bundle import fails, try single card import (for old sharing)
+                    if (!result.success) {
+                      const singleResult = await importApplication(importShareKey, importPasscode);
+                      if (singleResult) {
+                        result = { success: true, ownerName: 'Unknown', count: 1 };
+                      }
+                    }
+                    
                     setImportLoading(false);
-                    if (success) {
-                      showNotification('✓ Shared outreach card imported successfully!');
+                    if (result.success) {
+                      showNotification(`✓ Imported ${result.count || 1} card${(result.count || 1) > 1 ? 's' : ''} shared by ${result.ownerName || 'Unknown'}!`);
                       setIsImportModalOpen(false);
                     } else {
-                      setImportError('Invalid Share Key, incorrect passcode, or the card was deleted.');
+                      setImportError('Invalid Share Key, incorrect passcode, or the cards were deleted.');
                     }
                   }}
                   className="px-4 py-1.5 rounded bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold tracking-wide"

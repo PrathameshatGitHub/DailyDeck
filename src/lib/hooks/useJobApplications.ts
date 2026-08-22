@@ -250,6 +250,123 @@ export function useJobApplications() {
     }
   };
 
+  const shareJobApplications = async (cardIds: string[], passcode: string): Promise<string | null> => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) return null;
+
+      // 1. Resolve owner name (look in metadata, preferences, or email)
+      let ownerName = userData.user.user_metadata?.full_name || '';
+      if (!ownerName) {
+        // Fallback to preferences
+        const { data: prefData } = await supabase
+          .from('ai_email_preferences')
+          .select('full_name')
+          .eq('user_id', userData.user.id)
+          .maybeSingle();
+        if (prefData?.full_name) {
+          ownerName = prefData.full_name;
+        }
+      }
+      if (!ownerName) {
+        ownerName = userData.user.email || 'Nagin';
+      }
+
+      // 2. Generate share key
+      const randHex = Math.random().toString(36).substring(2, 8);
+      const shareKey = `job-bundle-${randHex}`;
+
+      // 3. Insert share header
+      const { data: shareData, error: shareErr } = await supabase
+        .from('job_bundle_shares')
+        .insert({
+          owner_id: userData.user.id,
+          owner_name: ownerName,
+          share_key: shareKey,
+          passcode: passcode,
+        })
+        .select()
+        .single();
+
+      if (shareErr || !shareData) {
+        console.error('Failed to create job bundle share:', shareErr?.message);
+        return null;
+      }
+
+      // 4. Fetch selected cards
+      const { data: selectedCards, error: fetchErr } = await supabase
+        .from('job_applications')
+        .select('*')
+        .in('id', cardIds);
+
+      if (fetchErr || !selectedCards || selectedCards.length === 0) {
+        // Clean up share
+        await supabase.from('job_bundle_shares').delete().eq('id', shareData.id);
+        return null;
+      }
+
+      // 5. Insert share items
+      const shareItems = selectedCards.map((card) => ({
+        share_id: shareData.id,
+        recruiter_name: card.recruiter_name,
+        company: card.company,
+        role: card.role,
+        location: card.location,
+        experience: card.experience,
+        skills: card.skills,
+        to_email: card.to_email,
+        phone: card.phone,
+        subject: card.subject,
+        body: card.body,
+      }));
+
+      const { error: itemsErr } = await supabase
+        .from('job_bundle_items')
+        .insert(shareItems);
+
+      if (itemsErr) {
+        console.error('Failed to save bundle items:', itemsErr.message);
+        await supabase.from('job_bundle_shares').delete().eq('id', shareData.id);
+        return null;
+      }
+
+      return shareKey;
+    } catch (err) {
+      console.error('Failed to share job applications:', err);
+      return null;
+    }
+  };
+
+  const importJobApplications = async (shareKey: string, passcode: string): Promise<{ success: boolean; ownerName?: string; count?: number }> => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) return { success: false };
+
+      const { data, error } = await supabase.rpc('import_shared_job_bundle', {
+        p_share_key: shareKey.trim(),
+        p_passcode: passcode.trim(),
+        p_importer_id: userData.user.id,
+      });
+
+      if (error || !data) {
+        console.error('Failed to import shared job bundle:', error?.message);
+        return { success: false };
+      }
+
+      // Refresh state
+      await fetchApplications();
+
+      return {
+        success: true,
+        ownerName: data.owner_name,
+        count: data.imported_count,
+      };
+    } catch (err) {
+      console.error('Import job bundle error:', err);
+      return { success: false };
+    }
+  };
+
   // Sort applications: Pending on top (0), Completed at bottom (1), then newest first
   const sortedApplications = [...applications].sort((a, b) => {
     const aOrder = a.status === 'pending' ? 0 : 1;
@@ -276,5 +393,7 @@ export function useJobApplications() {
     fetchApplications,
     shareApplication,
     importApplication,
+    shareJobApplications,
+    importJobApplications,
   };
 }

@@ -285,6 +285,94 @@ $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- job_bundle_shares & job_bundle_items — bulk sharing job application cards
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists job_bundle_shares (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid references auth.users not null,
+  owner_name  text not null,
+  share_key   text unique not null,
+  passcode    text not null,
+  created_at  timestamptz default now()
+);
+
+create table if not exists job_bundle_items (
+  id               uuid primary key default gen_random_uuid(),
+  share_id         uuid references job_bundle_shares(id) on delete cascade not null,
+  recruiter_name   text,
+  company          text,
+  role             text,
+  location         text,
+  experience       text,
+  skills           text[],
+  to_email         text not null,
+  phone            text,
+  subject          text not null,
+  body             text not null
+);
+
+alter table job_bundle_shares enable row level security;
+alter table job_bundle_items enable row level security;
+
+create policy "Users manage own job bundle shares" on job_bundle_shares
+  for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+
+create policy "Users manage own job bundle items" on job_bundle_items
+  for all using (
+    exists (
+      select 1 from job_bundle_shares where id = job_bundle_items.share_id and owner_id = auth.uid()
+    )
+  );
+
+-- RPC Function to safely import bulk job application cards bypassing RLS boundaries
+create or replace function import_shared_job_bundle(
+  p_share_key text,
+  p_passcode text,
+  p_importer_id uuid
+)
+returns jsonb
+language plpgsql
+security definer -- runs with administrative privileges to duplicate job cards safely
+as $$
+declare
+  v_share_id uuid;
+  v_owner_name text;
+  v_item record;
+  v_imported_count integer := 0;
+begin
+  -- 1. Check share key and passcode
+  select id, owner_name into v_share_id, v_owner_name
+  from job_bundle_shares
+  where share_key = p_share_key and passcode = p_passcode;
+
+  if not found then
+    raise exception 'Invalid Share Key or Passcode';
+  end if;
+
+  -- 2. Loop and duplicate each job card under importer's user_id
+  for v_item in 
+    select recruiter_name, company, role, location, experience, skills, to_email, phone, subject, body
+    from job_bundle_items
+    where share_id = v_share_id
+  loop
+    insert into job_applications (
+      user_id, recruiter_name, company, role, location, experience, skills, to_email, phone, subject, body, status
+    ) values (
+      p_importer_id, v_item.recruiter_name, v_item.company, v_item.role, v_item.location, v_item.experience, v_item.skills, v_item.to_email, v_item.phone, v_item.subject, v_item.body, 'pending'
+    );
+    v_imported_count := v_imported_count + 1;
+  end loop;
+
+  return jsonb_build_object(
+    'success', true,
+    'owner_name', v_owner_name,
+    'imported_count', v_imported_count
+  );
+end;
+$$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- email_shares & email_share_items — bulk sharing email templates
 -- Run this in Supabase SQL Editor
 -- ─────────────────────────────────────────────────────────────────────────────
