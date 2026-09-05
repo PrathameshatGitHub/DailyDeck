@@ -88,7 +88,8 @@ ${exampleBody}
 HOW TO ADAPT THIS EXAMPLE BODY:
 - The example body contains specific details like "React.js Developer position at your organization" or "Frontend Developer position". You must replace these with the actual role from the job post (e.g. "Backend Engineer position").
 - If the company name is available from the post, replace "your organization" with the company name (e.g., "apply for the Backend Engineer position at iBotix"). If the company is NOT specified, keep it general as "your organization" or "your company".
-- If the recruiter's name is known, start with "Hi [Recruiter Name],". If not, start with a polite fallback such as "Hi," or "Hi Hiring Team,".
+- Start emails with varied professional greetings like "Hi hiring manager,", "Dear hiring manager,", "Hello hiring manager,", "Hi hiring team,", "Dear hiring team," etc. to avoid spam detection.
+- IMPORTANT: If the example body already contains greeting phrases like "I hope you are doing well" or "I hope this message finds you well", REMOVE them before adding your chosen greeting and opening to avoid duplication.
 - NEVER output literal brackets like "[Company]", "[Role]", or "[Recruiter Name]" in the generated subject or body under any circumstances. If details are missing, use natural English fallbacks.`
     : '';
 
@@ -114,17 +115,18 @@ ROLE ADAPTATION RULE (CRITICAL):
 - NEVER write a generic Frontend Developer email if the job is for a Backend role or any other role.
 
 SPAM AVOIDANCE - WITHIN-BATCH VARIATION (STRICT COMPLIANCE REQUIRED):
-When generating multiple cards in the same batch, you MUST vary the email content opening phrase. Use the following greetings sequentially:
-- For the first card (id: "app_1"), begin the body with: "I hope this message finds you well." (or "Hi [Recruiter Name], I hope this message finds you well.")
-- For the second card (id: "app_2"), begin the body with: "I came across your post on LinkedIn and was excited to apply."
-- For the third card (id: "app_3"), begin the body with: "I noticed you are actively hiring for this role and I would love to be considered."
-- For the fourth card (id: "app_4"), begin the body with: "I recently saw your job post and believe my background is a strong match."
+When generating multiple cards in the same batch, you MUST vary the email content opening phrase to avoid spam detection. Use the following greetings sequentially:
+- For the first card (id: "app_1"), begin the body with: "Hi hiring manager,\n\nI hope this message finds you well."
+- For the second card (id: "app_2"), begin the body with: "Dear hiring manager,\n\nI came across your post on LinkedIn and was excited to apply."
+- For the third card (id: "app_3"), begin the body with: "Hello hiring manager,\n\nI noticed you are actively hiring for this role and I would love to be considered."
+- For the fourth card (id: "app_4"), begin the body with: "Hi hiring team,\n\nI recently saw your job post and believe my background is a strong match."
+- For the fifth card (id: "app_5"), begin the body with: "Dear hiring team,\n\nI am writing to express my interest in this position."
 - If there are more cards, rotate these greetings in order.
 - Also, vary the sentence structures in the skills paragraph slightly by reordering skills or using synonyms so they do not look like a carbon copy.
 
 FORMATTING RULE FOR THE body FIELD:
 Format the email body with clear blank lines (double newlines) separating each paragraph:
-- Opening greeting line (e.g. "Hi Riya," or "Hi Hiring Team," - never literal brackets!)
+- Opening greeting line: Use varied professional greetings like "Hi hiring manager,", "Dear hiring manager,", "Hello hiring manager,", "Hi hiring team,", "Dear hiring team," etc.
 - 1-2 sentence intro about why applying and to which role at which company (or "your organization")
 - 2-3 sentence skills paragraph adapted to match the job post requirements
 - Closing line about attached resume
@@ -203,31 +205,39 @@ function extractFallback(rawText: string, prefs: EmailPreferences) {
   const yourEmail = prefs.your_email?.trim() || '';
   const exampleBody = prefs.example_body?.trim();
 
+  const greetings = [
+    "Hi hiring manager,",
+    "Dear hiring manager,",
+    "Hello hiring manager,",
+    "Hi hiring team,",
+    "Dear hiring team,"
+  ];
+
   const openings = [
     "I hope this message finds you well.",
     "I came across your post on LinkedIn and was excited to apply.",
     "I noticed you are actively hiring for this role and I would love to be considered.",
-    "I recently saw your job post and believe my background is a strong match."
+    "I recently saw your job post and believe my background is a strong match.",
+    "I am writing to express my interest in this position."
   ];
 
   const applications: JobApplicationCard[] = uniqueEmails.map((email, idx) => {
+    const chosenGreeting = greetings[idx % greetings.length];
     const chosenOpening = openings[idx % openings.length];
     
     let baseBody = exampleBody ? exampleBody : '';
 
     // If they supplied an example body, let's substitute the opener dynamically if it has standard greeting phrases
     if (baseBody) {
-      // Find typical openings and swap them out to force variation in fallback
-      const matchRegex = /I hope (you are doing well|this finds you well|this message finds you well)\./gi;
-      if (matchRegex.test(baseBody)) {
-        baseBody = baseBody.replace(matchRegex, chosenOpening);
-      } else {
-        // If not found, prepended it
-        baseBody = chosenOpening + "\n\n" + baseBody;
-      }
+      // Check if the example body already has greeting-like phrases and remove them to avoid duplication
+      const greetingRegex = /^(I hope (you are doing well|this finds you well|this message finds you well)\.?\s*)/i;
+      baseBody = baseBody.replace(greetingRegex, '').trim();
+      
+      // Always start with varied greeting followed by the chosen opening
+      baseBody = `${chosenGreeting}\n\n${chosenOpening}\n\n${baseBody}`;
     } else {
       baseBody = [
-        'Hi,',
+        chosenGreeting,
         '',
         chosenOpening,
         '',
