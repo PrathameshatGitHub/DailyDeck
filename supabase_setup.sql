@@ -183,6 +183,32 @@ create policy "Users manage own job applications" on job_applications
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- image_applications table — stores AI generated cold email cards from images
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table image_applications (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid references auth.users not null,
+  recruiter_name text,
+  company        text,
+  role           text,
+  location       text,
+  experience     text,
+  skills         text[],
+  to_email       text not null,
+  phone          text,
+  subject        text not null,
+  body           text not null,
+  status         text not null default 'pending' check (status in ('pending', 'completed')),
+  source_image   text, -- URL or base64 of the source image
+  created_at     timestamptz default now()
+);
+
+alter table image_applications enable row level security;
+create policy "Users manage own image applications" on image_applications
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- ai_email_preferences table — stores per-user AI cold email generation profile
 -- Run this in Supabase SQL Editor
 -- ─────────────────────────────────────────────────────────────────────────────

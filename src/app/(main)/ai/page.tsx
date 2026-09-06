@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useEmails } from '@/lib/hooks/useEmails';
 import { useWhatsApp, buildWhatsAppLink, DEFAULT_WHATSAPP_TEMPLATE } from '@/lib/hooks/useWhatsApp';
 import { useJobApplications, type JobApplication } from '@/lib/hooks/useJobApplications';
+import { useImageApplications, type ImageApplication } from '@/lib/hooks/useImageApplications';
 import { useEmailPreferences, type EmailPreferences } from '@/lib/hooks/useEmailPreferences';
 import {
   Sparkles,
@@ -40,7 +41,9 @@ import {
   User,
   Link,
   Share2,
-  Download
+  Download,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { MultiSelectBar } from '@/components/MultiSelectBar';
@@ -75,8 +78,19 @@ export default function AiExtractorPage() {
     importJobApplications,
   } = useJobApplications();
 
-  // Mode: 'job_applications' (Default) or 'extractor'
-  const [activeTab, setActiveTab] = useState<'job_applications' | 'extractor'>('job_applications');
+  // Hook for Image-based Job Applications (separate from LinkedIn posts)
+  const {
+    applications: savedImageCards,
+    loading: imageCardsLoading,
+    stats: imageStats,
+    addBatchApplications: addBatchImageApplications,
+    toggleStatus: toggleImageStatus,
+    updateApplication: updateImageCardInDb,
+    deleteApplication: deleteImageCardFromDb,
+  } = useImageApplications();
+
+  // Mode: 'job_applications' (Default), 'extractor', or 'image_extractor'
+  const [activeTab, setActiveTab] = useState<'job_applications' | 'extractor' | 'image_extractor'>('job_applications');
 
   const [rawText, setRawText] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -88,6 +102,11 @@ export default function AiExtractorPage() {
   const [jobSearch, setJobSearch] = useState('');
   const [jobStatusFilter, setJobStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [cardToDelete, setCardToDelete] = useState<{ id: string; title: string } | null>(null);
+
+  // Image handling state
+  const [uploadedImages, setUploadedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [imageLoading, setImageLoading] = useState(false);
 
   // Copy State Feedback per Card & Type
   const [copiedState, setCopiedState] = useState<{ id: string; type: 'email' | 'subject' | 'body' | 'all' } | null>(null);
@@ -155,38 +174,40 @@ export default function AiExtractorPage() {
 
   // Run AI processing
   const handleProcess = async () => {
-    if (!rawText.trim()) {
-      showNotification('Please paste text to process.');
-      return;
-    }
-
     setLoading(true);
     setCopiedState(null);
 
     try {
-      const res = await fetch('/api/ai/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: rawText,
-          apiKey: apiKey.trim() || undefined,
-          mode: activeTab,
-          preferences,
-        })
-      });
+      if (activeTab === 'image_extractor') {
+        // Image processing
+        if (uploadedImages.length === 0) {
+          showNotification('Please upload or paste images to process.');
+          setLoading(false);
+          return;
+        }
 
-      const data = await res.json();
+        setImageLoading(true);
+        const formData = new FormData();
+        uploadedImages.forEach((image) => formData.append('images', image));
+        if (apiKey) formData.append('apiKey', apiKey);
+        formData.append('preferences', JSON.stringify(preferences));
 
-      if (data.error) {
-        showNotification(`Error: ${data.error}`);
-      } else {
-        if (activeTab === 'job_applications') {
+        const res = await fetch('/api/ai/extract-image', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+          showNotification(`Error: ${data.error}`);
+        } else {
           const apps = data.applications || [];
           if (apps.length > 0) {
-            // 1. Automatically save generated cold email cards to Supabase database
-            await addBatchApplications(apps);
+            // Save generated cold email cards to separate image_applications table
+            await addBatchImageApplications(apps);
 
-            // 2. Automatically save any detected phone numbers to WhatsApp Outreach tab
+            // Save detected phone numbers to WhatsApp Outreach tab
             const phoneItems: Array<{ phone: string; name?: string; company?: string }> = [];
             for (const app of apps) {
               if (app.phone) {
@@ -198,7 +219,6 @@ export default function AiExtractorPage() {
               }
             }
 
-            // Also check data.phones list
             if (data.phones && Array.isArray(data.phones)) {
               for (const p of data.phones) {
                 if (!phoneItems.some(it => it.phone === p)) {
@@ -209,25 +229,94 @@ export default function AiExtractorPage() {
 
             if (phoneItems.length > 0) {
               const now = new Date();
-              const batchTitle = `${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'short' })} WA Batch`;
+              const batchTitle = `${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'short' })} Image WA Batch`;
               await addBatchContacts(phoneItems, batchTitle);
-              showNotification(`Generated ${apps.length} Cold Emails & added ${phoneItems.length} WhatsApp card${phoneItems.length > 1 ? 's' : ''} to WhatsApp Outreach tab!`);
+              showNotification(`Generated ${apps.length} Cold Emails from images & added ${phoneItems.length} WhatsApp card${phoneItems.length > 1 ? 's' : ''} to WhatsApp Outreach tab!`);
             } else {
-              showNotification(`Generated & saved ${apps.length} cold email cards to database!`);
+              showNotification(`Generated & saved ${apps.length} cold email cards from images!`);
             }
 
-            setRawText(''); // Clear input after successful creation
+            // Clear images after successful processing
+            setUploadedImages([]);
+            setImagePreviews([]);
           } else {
-            showNotification('No job applications detected in text.');
+            showNotification('No job applications detected in images.');
           }
+        }
+        setImageLoading(false);
+      } else {
+        // Text processing (existing logic)
+        if (!rawText.trim()) {
+          showNotification('Please paste text to process.');
+          setLoading(false);
+          return;
+        }
+
+        const res = await fetch('/api/ai/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: rawText,
+            apiKey: apiKey.trim() || undefined,
+            mode: activeTab,
+            preferences,
+          })
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+          showNotification(`Error: ${data.error}`);
         } else {
-          setExtractedEntries(data.entries || []);
-          setExtractedEmails(data.emails || []);
-          setExtractedPhones(data.phones || []);
-          setCommaSeparated(data.commaSeparated || '');
-          setPhonesCommaSeparated(data.phonesCommaSeparated || '');
-          setExtractionSource(data.source || 'parser');
-          showNotification(`Extracted ${data.count || 0} emails & ${data.phoneCount || 0} phone numbers!`);
+          if (activeTab === 'job_applications') {
+            const apps = data.applications || [];
+            if (apps.length > 0) {
+              // 1. Automatically save generated cold email cards to Supabase database
+              await addBatchApplications(apps);
+
+              // 2. Automatically save any detected phone numbers to WhatsApp Outreach tab
+              const phoneItems: Array<{ phone: string; name?: string; company?: string }> = [];
+              for (const app of apps) {
+                if (app.phone) {
+                  phoneItems.push({
+                    phone: app.phone,
+                    name: app.recruiter_name || undefined,
+                    company: app.company || undefined,
+                  });
+                }
+              }
+
+              // Also check data.phones list
+              if (data.phones && Array.isArray(data.phones)) {
+                for (const p of data.phones) {
+                  if (!phoneItems.some(it => it.phone === p)) {
+                    phoneItems.push({ phone: p });
+                  }
+                }
+              }
+
+              if (phoneItems.length > 0) {
+                const now = new Date();
+                const batchTitle = `${now.getDate()} ${now.toLocaleDateString('en-US', { month: 'short' })} WA Batch`;
+                await addBatchContacts(phoneItems, batchTitle);
+                showNotification(`Generated ${apps.length} Cold Emails & added ${phoneItems.length} WhatsApp card${phoneItems.length > 1 ? 's' : ''} to WhatsApp Outreach tab!`);
+              } else {
+                showNotification(`Generated & saved ${apps.length} cold email cards to database!`);
+              }
+
+              setRawText(''); // Clear input after successful creation
+            } else {
+              showNotification('No job applications detected in text.');
+            }
+          } else {
+            setExtractedEntries(data.entries || []);
+            setExtractedEmails(data.emails || []);
+            setExtractedPhones(data.phones || []);
+            setCommaSeparated(data.commaSeparated || '');
+            setPhonesCommaSeparated(data.phonesCommaSeparated || '');
+            setExtractionSource(data.source || 'parser');
+            showNotification(`Extracted ${data.count || 0} emails & ${data.phoneCount || 0} phone numbers!`);
+          }
         }
       }
     } catch (err: any) {
@@ -276,6 +365,70 @@ export default function AiExtractorPage() {
     } catch {
       showNotification('Could not read clipboard. Please paste manually.');
     }
+  };
+
+  // Image handling functions
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const validFiles = files.filter(file => file.type.startsWith('image/'));
+    if (validFiles.length === 0) {
+      showNotification('Please upload valid image files.');
+      return;
+    }
+
+    setUploadedImages(prev => [...prev, ...validFiles]);
+
+    // Create previews
+    validFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setImagePreviews(prev => [...prev, e.target?.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    showNotification(`Added ${validFiles.length} image${validFiles.length > 1 ? 's' : ''}`);
+  };
+
+  const handleImagePaste = async (e: React.ClipboardEvent) => {
+    if (activeTab !== 'image_extractor') return;
+
+    const items = Array.from(e.clipboardData.items);
+    const imageFiles: File[] = [];
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      setUploadedImages(prev => [...prev, ...imageFiles]);
+
+      imageFiles.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setImagePreviews(prev => [...prev, e.target?.result as string]);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      showNotification(`Pasted ${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''}`);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const clearAllImages = () => {
+    setUploadedImages([]);
+    setImagePreviews([]);
   };
 
   // Filter Job Cards (Pending on top, Completed at bottom)
@@ -366,6 +519,18 @@ export default function AiExtractorPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('image_extractor')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-colors ${
+              activeTab === 'image_extractor'
+                ? 'bg-[#89295E] text-white border border-[#89295E]'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+            <span>Images &rarr; Cold Emails</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('extractor')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-colors ${
               activeTab === 'extractor'
@@ -385,6 +550,13 @@ export default function AiExtractorPage() {
               <span className="text-[#E8B54D] font-bold">{jobStats.pending} pending</span>
               <span className="text-zinc-600">&bull;</span>
               <span className="text-[#7FE7C4] font-bold">{jobStats.completed} completed</span>
+            </div>
+          )}
+          {activeTab === 'image_extractor' && (
+            <div className="flex items-center gap-2 font-mono text-[11px]">
+              <span className="text-[#E8B54D] font-bold">{imageStats.pending} pending</span>
+              <span className="text-zinc-600">&bull;</span>
+              <span className="text-[#7FE7C4] font-bold">{imageStats.completed} completed</span>
             </div>
           )}
           {activeTab === 'job_applications' && (
@@ -1086,6 +1258,560 @@ export default function AiExtractorPage() {
                             )}
                           </button>
 
+                          {/* Copy All (Email + Sub + Body) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const fullText = `To: ${card.to_email}\nSubject: ${card.subject}\n\n${card.body}`;
+                              copyToClipboard(fullText, card.id, 'all', 'Full Email Package');
+                            }}
+                            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                              isAllCopied
+                                ? 'bg-[#7FE7C4] text-black'
+                                : 'bg-[#89295E] hover:bg-[#a03672] text-white'
+                            }`}
+                          >
+                            {isAllCopied ? (
+                              <>
+                                <Check className="w-3 h-3" />
+                                <span>All Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copy All</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* MODE 3: IMAGE EXTRACTOR (JOB POSTINGS FROM IMAGES) */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeTab === 'image_extractor' && (
+        <div className="space-y-6">
+          
+          {/* ⚙️ Collapsible AI Email Preferences Panel (reused from job_applications) */}
+          <div className="border border-[#242930] rounded-xl overflow-hidden shadow-sm">
+            {/* Toggle Header */}
+            <button
+              type="button"
+              onClick={() => setShowPrefsPanel((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-[#15181D] hover:bg-[#1a1e24] transition-colors group"
+            >
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <Settings2 className="w-3.5 h-3.5 text-[#89295E]" />
+                <span className="font-bold text-zinc-300">AI Email Preferences</span>
+                {hasPreferences ? (
+                  <span className="px-1.5 py-0.5 rounded bg-[#7FE7C4]/15 text-[#7FE7C4] text-[9px] font-bold border border-[#7FE7C4]/30">
+                    ✓ Profile Saved
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded bg-[#E8B54D]/15 text-[#E8B54D] text-[9px] font-bold border border-[#E8B54D]/30">
+                    Setup Required
+                  </span>
+                )}
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${showPrefsPanel ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Expandable Form */}
+            {showPrefsPanel && (
+              <div className="bg-[#0D0F12] border-t border-[#242930] p-4 space-y-4">
+                <p className="text-[10px] font-mono text-zinc-500 leading-relaxed">
+                  Fill in your profile once. The AI will use this to generate emails tailored to <span className="text-zinc-300 font-bold">any job role</span> extracted from images.
+                </p>
+
+                {/* Row 1: Personal Info */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Full Name</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <User className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.full_name}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, full_name: e.target.value }))}
+                        placeholder="e.g. Prathamesh Mali"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Email</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Mail className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.your_email}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, your_email: e.target.value }))}
+                        placeholder="your@email.com"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Phone (with country code)</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Phone className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.phone}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, phone: e.target.value }))}
+                        placeholder="e.g. 7620537089"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">LinkedIn URL</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Link className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.linkedin_url}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, linkedin_url: e.target.value }))}
+                        placeholder="https://linkedin.com/in/you"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Portfolio URL</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Globe className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.portfolio_url}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, portfolio_url: e.target.value }))}
+                        placeholder="https://your-portfolio.dev"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Your Role / Title</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Briefcase className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.your_role}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, your_role: e.target.value }))}
+                        placeholder="e.g. Frontend Developer / Full Stack"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Years of Experience</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Sparkles className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.experience}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, experience: e.target.value }))}
+                        placeholder="e.g. 2 years"
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1 sm:col-span-1">
+                    <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">Key Skills (comma separated)</label>
+                    <div className="flex items-center gap-2 bg-[#15181D] border border-[#242930] rounded-lg px-2.5 py-2 focus-within:border-[#89295E]">
+                      <Zap className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        value={localPrefs.key_skills}
+                        onChange={(e) => setLocalPrefs(p => ({ ...p, key_skills: e.target.value }))}
+                        placeholder="React.js, Next.js, TypeScript, Node.js..."
+                        className="flex-1 bg-transparent text-xs text-zinc-200 outline-none font-mono placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Example Subject */}
+                <div className="space-y-1">
+                  <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                    Example Subject Line <span className="text-zinc-600 normal-case">(AI adapts [Role] from the job post)</span>
+                  </label>
+                  <input
+                    value={localPrefs.example_subject}
+                    onChange={(e) => setLocalPrefs(p => ({ ...p, example_subject: e.target.value }))}
+                    placeholder="e.g. Application for [Role] Position - Prathamesh Mali"
+                    className="w-full bg-[#15181D] border border-[#242930] rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono outline-none focus:border-[#89295E] placeholder:text-zinc-600"
+                  />
+                </div>
+
+                {/* Example Body */}
+                <div className="space-y-1">
+                  <label className="block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                    Example Email Body <span className="text-zinc-600 normal-case">(Your best cold email — AI uses this as style reference and adapts per job)</span>
+                  </label>
+                  <textarea
+                    value={localPrefs.example_body}
+                    onChange={(e) => setLocalPrefs(p => ({ ...p, example_body: e.target.value }))}
+                    rows={8}
+                    placeholder={`Hi [Recruiter Name],\n\nI hope this message finds you well.\n\nI am writing to apply for the [Role] position at [Company]. I have 2 years of experience in frontend development specializing in React.js, Next.js, and TypeScript...\n\n...\n\nBest regards,\nYour Name`}
+                    className="w-full bg-[#15181D] border border-[#242930] rounded-lg p-3 text-xs text-zinc-300 font-sans leading-relaxed outline-none focus:border-[#89295E] resize-none placeholder:text-zinc-600"
+                  />
+                </div>
+
+                {/* Save Button */}
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-[9px] font-mono text-zinc-600">Saved to your account — synced across sessions</p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await savePreferences(localPrefs);
+                      if (ok) {
+                        showNotification('✓ Email preferences saved!');
+                        setShowPrefsPanel(false);
+                      } else {
+                        showNotification('Failed to save preferences. Check DB.');
+                      }
+                    }}
+                    disabled={prefsSaving}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold font-mono transition-all"
+                  >
+                    <Save className="w-3 h-3" />
+                    <span>{prefsSaving ? 'Saving...' : 'Save Preferences'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Image Upload Section */}
+          <div className="bg-[#15181D] border border-[#242930] rounded-xl p-4 space-y-3 shadow-md" onPaste={handleImagePaste}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-mono text-xs text-zinc-300">
+                <ImageIcon className="w-3.5 h-3.5 text-[#ff8ac8]" />
+                <span className="font-bold">Upload Job Post Images</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#1F2329] hover:bg-[#282D35] text-[11px] font-mono text-zinc-300 transition-colors cursor-pointer">
+                  <Upload className="w-3 h-3 text-[#ff8ac8]" />
+                  <span>Upload Images</span>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                  />
+                </label>
+                {uploadedImages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearAllImages}
+                    className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-[#1F2329]"
+                    title="Clear all images"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Image Previews Grid */}
+            {imagePreviews.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {imagePreviews.map((preview, idx) => (
+                  <div key={idx} className="relative group">
+                    <img
+                      src={preview}
+                      alt={`Uploaded ${idx + 1}`}
+                      className="w-full h-32 object-cover rounded-lg border border-[#242930]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(idx)}
+                      className="absolute top-1 right-1 p-1 bg-red-500/80 hover:bg-red-500 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove image"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-[#242930] rounded-lg p-8 text-center">
+                <ImageIcon className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                <p className="text-xs text-zinc-400 font-mono mb-1">
+                  Upload screenshots or paste images (Ctrl+V)
+                </p>
+                <p className="text-[10px] text-zinc-600 font-sans">
+                  Supports multiple images with job postings, recruiter info, or hiring announcements
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <span className="text-[10px] font-mono text-zinc-500">
+                {uploadedImages.length > 0 
+                  ? `${uploadedImages.length} image${uploadedImages.length > 1 ? 's' : ''} ready for processing`
+                  : 'No images uploaded yet'
+                }
+              </span>
+
+              <button
+                type="button"
+                onClick={handleProcess}
+                disabled={loading || imageLoading || uploadedImages.length === 0}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-[#89295E] hover:bg-[#a03672] disabled:opacity-40 text-white text-xs font-bold font-mono tracking-wide transition-all shadow-md active:scale-[0.98]"
+              >
+                {(loading || imageLoading) ? (
+                  <>
+                    <Zap className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing Images...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Extract Emails from Images</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Generated Image Cards (similar to job_applications but separate) */}
+          <div className="space-y-4">
+            {imageCardsLoading && savedImageCards.length === 0 ? (
+              <div className="flex items-center justify-center py-20 font-mono text-xs text-zinc-500">
+                <span className="animate-pulse">&gt; loading_image_applications...</span>
+              </div>
+            ) : savedImageCards.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-[#242930] rounded-2xl bg-[#15181D]/30 max-w-2xl mx-auto space-y-2">
+                <ImageIcon className="w-8 h-8 text-zinc-600 mb-1" />
+                <p className="text-xs text-zinc-400 font-bold font-mono">
+                  No image-based applications yet
+                </p>
+                <p className="text-[11px] text-zinc-600 max-w-xs font-sans">
+                  Upload job posting images above and click "Extract Emails from Images" to create application cards!
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {savedImageCards.map((card) => {
+                  const isCompleted = card.status === 'completed';
+                  const isEmailCopied = copiedState?.id === card.id && copiedState.type === 'email';
+                  const isSubCopied = copiedState?.id === card.id && copiedState.type === 'subject';
+                  const isBodyCopied = copiedState?.id === card.id && copiedState.type === 'body';
+                  const isAllCopied = copiedState?.id === card.id && copiedState.type === 'all';
+
+                  const mailtoUrl = `mailto:${card.to_email}?subject=${encodeURIComponent(card.subject || '')}&body=${encodeURIComponent(card.body || '')}`;
+
+                  return (
+                    <div
+                      key={card.id}
+                      className={`bg-[#15181D] border rounded-2xl p-4.5 space-y-3.5 shadow-md flex flex-col justify-between transition-all duration-150 ${
+                        isCompleted
+                          ? 'border-[#242930] opacity-80 hover:opacity-100'
+                          : 'border-[#89295E]/40 hover:border-[#89295E]/80'
+                      }`}
+                    >
+                      {/* Top Header: Company, Recruiter, Role, Status Button */}
+                      <div className="space-y-1.5 pb-2.5 border-b border-[#242930]">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h3 className={`text-sm font-bold truncate ${isCompleted ? 'text-zinc-400 line-through' : 'text-zinc-100'}`}>
+                              <span>{card.role || 'Unknown Role'}</span>
+                              {card.company && (
+                                <span className="text-[#ff8ac8] font-normal ml-1.5">@ {card.company}</span>
+                              )}
+                            </h3>
+                            {card.recruiter_name && (
+                              <p className="text-[11px] font-mono text-zinc-400 mt-0.5">
+                                Recruiter: <span className="text-zinc-200">{card.recruiter_name}</span>
+                              </p>
+                            )}
+                            {card.source_image && (
+                              <p className="text-[9px] font-mono text-zinc-500 mt-0.5">
+                                <ImageIcon className="w-2 h-2 inline mr-1" />
+                                From image
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Status Toggle Badge */}
+                          <div className="flex items-center gap-1.5 shrink-0 font-mono text-[9px] font-bold uppercase tracking-wider">
+                            <button
+                              type="button"
+                              onClick={() => toggleImageStatus(card.id)}
+                              className={`px-2 py-1 rounded-md flex items-center gap-1.5 transition-all border ${
+                                isCompleted
+                                  ? 'bg-[#7FE7C4]/15 text-[#7FE7C4] border-[#7FE7C4]/30 hover:bg-[#7FE7C4]/25'
+                                  : 'bg-[#E8B54D]/15 text-[#E8B54D] border-[#E8B54D]/30 hover:bg-[#E8B54D]/25'
+                              }`}
+                              title="Click to toggle status"
+                            >
+                              {isCompleted ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-[#7FE7C4]" />
+                                  <span>Done</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Circle className="w-3 h-3 text-[#E8B54D]" />
+                                  <span>Pending</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setCardToDelete({ id: card.id, title: `${card.role || 'Job'} @ ${card.company || card.to_email}` })}
+                              className="p-1 hover:bg-red-950/40 rounded text-zinc-500 hover:text-red-400 transition-colors"
+                              title="Delete card"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Location & Skills tags */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {card.location && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1F2329] border border-[#242930] text-[10px] font-mono text-zinc-400">
+                              <MapPin className="w-3 h-3 text-[#E8B54D]" />
+                              {card.location}
+                            </span>
+                          )}
+                          {card.skills && card.skills.map((skill, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="px-1.5 py-0.5 rounded bg-[#0D0F12] border border-[#242930] text-[9px] font-mono text-zinc-400"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 1. Target Email Field with Copy Button */}
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                          Send To Email:
+                        </label>
+                        <div className="flex items-center gap-2 bg-[#0D0F12] border border-[#242930] rounded-lg px-2.5 py-1.5">
+                          <Mail className="w-3.5 h-3.5 text-[#7FE7C4] shrink-0" />
+                          <input
+                            value={card.to_email || ''}
+                            onChange={(e) => updateImageCardInDb(card.id, { to_email: e.target.value })}
+                            className="flex-1 bg-transparent text-xs font-mono text-[#7FE7C4] font-bold outline-none border-none select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(card.to_email, card.id, 'email', 'Email Address')}
+                            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono font-bold transition-all shrink-0 ${
+                              isEmailCopied
+                                ? 'bg-[#7FE7C4] text-black'
+                                : 'bg-[#1F2329] hover:bg-[#282D35] text-zinc-300 border border-[#242930]'
+                            }`}
+                            title="Copy email address"
+                          >
+                            {isEmailCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-[#7FE7C4]" />}
+                            <span>{isEmailCopied ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Optional: WhatsApp Outreach if phone was extracted */}
+                      {card.phone && (
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                            Extracted WhatsApp Contact:
+                          </label>
+                          <div className="flex items-center justify-between bg-[#0D0F12] border border-[#242930] rounded-lg px-2.5 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <MessageCircle className="w-3.5 h-3.5 text-[#25D366] shrink-0" />
+                              <span className="font-mono text-xs text-[#25D366] font-bold">+{card.phone}</span>
+                            </div>
+                            <a
+                              href={buildWhatsAppLink(card.phone, DEFAULT_WHATSAPP_TEMPLATE)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#25D366] hover:bg-[#20ba5a] text-black text-[10px] font-mono font-bold transition-all"
+                            >
+                              <span>Chat on WhatsApp</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 2. Subject Line Field with Copy Button */}
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                          Subject Line:
+                        </label>
+                        <div className="flex items-center gap-2 bg-[#0D0F12] border border-[#242930] rounded-lg px-2.5 py-1.5">
+                          <input
+                            value={card.subject || ''}
+                            onChange={(e) => updateImageCardInDb(card.id, { subject: e.target.value })}
+                            className="flex-1 bg-transparent text-xs text-sans text-zinc-200 outline-none border-none select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(card.subject, card.id, 'subject', 'Subject Line')}
+                            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono font-bold transition-all shrink-0 ${
+                              isSubCopied
+                                ? 'bg-[#7FE7C4] text-black'
+                                : 'bg-[#1F2329] hover:bg-[#282D35] text-zinc-300 border border-[#242930]'
+                            }`}
+                            title="Copy subject line"
+                          >
+                            {isSubCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-[#ff8ac8]" />}
+                            <span>{isSubCopied ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Tailored Email Body with Copy Button */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
+                            Personalized Pitch Body:
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(card.body, card.id, 'body', 'Email Body')}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                              isBodyCopied
+                                ? 'bg-[#7FE7C4] text-black'
+                                : 'text-zinc-400 hover:text-zinc-200 bg-[#1F2329]'
+                            }`}
+                            title="Copy full body"
+                          >
+                            {isBodyCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-[#7FE7C4]" />}
+                            <span>{isBodyCopied ? 'Body Copied!' : 'Copy Body'}</span>
+                          </button>
+                        </div>
+
+                        <textarea
+                          value={card.body || ''}
+                          onChange={(e) => updateImageCardInDb(card.id, { body: e.target.value })}
+                          rows={12}
+                          className="w-full bg-[#0D0F12] border border-[#242930] rounded-lg p-3 text-xs text-zinc-300 font-sans leading-relaxed outline-none focus:border-[#89295E] resize-none"
+                        />
+                      </div>
+
+                      {/* Card Footer: Quick Actions */}
+                      <div className="pt-2 border-t border-[#242930] flex flex-wrap items-center justify-between gap-2 font-mono text-[10px]">
+                        {/* Open in Mail app */}
+                        <a
+                          href={mailtoUrl}
+                          onClick={() => { if (!isCompleted) toggleImageStatus(card.id); }}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1F2329] hover:bg-[#282D35] text-zinc-200 border border-[#242930] hover:border-zinc-600 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3 text-sky-400" />
+                          <span>Open in Mail</span>
+                        </a>
+
+                        <div className="flex items-center gap-2">
                           {/* Copy All (Email + Sub + Body) */}
                           <button
                             type="button"
