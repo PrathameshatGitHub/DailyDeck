@@ -8,6 +8,7 @@ import {
   buildWhatsAppLink,
   cleanPhoneNumber,
 } from '@/lib/hooks/useWhatsApp';
+import { useGlobalSpace } from '@/lib/hooks/useGlobalSpace';
 import {
   MessageCircle,
   Plus,
@@ -27,11 +28,14 @@ import {
   Edit3,
   Layers,
   Send,
-  Link2
+  Link2,
+  ChevronDown,
+  Globe
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function WhatsAppOutreachPage() {
+  const { shareToGlobal, getUnsharedItems } = useGlobalSpace();
   const {
     contacts,
     loading,
@@ -70,12 +74,17 @@ export default function WhatsAppOutreachPage() {
   const [selectedBatch, setSelectedBatch] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'contacted'>('all');
 
-  // Contact actions
+  // Contact actions & Collection state
   const [contactToDelete, setContactToDelete] = useState<{ id: string; name?: string; phone: string } | null>(null);
   const [editingContact, setEditingContact] = useState<WhatsAppContact | null>(null);
   const [editMessage, setEditMessage] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Collected Numbers Card state
+  const [showNumbersCard, setShowNumbersCard] = useState(false);
+  const [numberFormat, setNumberFormat] = useState<'comma' | 'lines' | 'clean'>('comma');
+  const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -482,6 +491,182 @@ export default function WhatsAppOutreachPage() {
           </div>
         )}
       </div>
+
+      {/* Action Bar: All Collected WhatsApp Numbers Card */}
+      {contacts.length > 0 && (() => {
+        const validPhones = Array.from(
+          new Set(contacts.map(c => c.phone?.trim()).filter(Boolean))
+        );
+
+        const commaText = validPhones.map(p => p.startsWith('+') ? p : `+${p}`).join(', ');
+        const linesText = validPhones.map(p => p.startsWith('+') ? p : `+${p}`).join('\n');
+        const cleanText = validPhones.map(p => p.replace(/\D/g, '')).join(', ');
+        const waLinksText = validPhones.map(p => buildWhatsAppLink(p, DEFAULT_WHATSAPP_TEMPLATE)).join('\n');
+
+        const displayText = numberFormat === 'comma' ? commaText : numberFormat === 'lines' ? linesText : cleanText;
+
+        return (
+          <div className="bg-[#15181D] border border-[#25D366]/40 rounded-xl overflow-hidden shadow-lg transition-all max-w-5xl mx-auto">
+            {/* Header Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-[#1A1D24] border-b border-[#242930]">
+              <div className="flex items-center gap-2 font-mono text-xs text-zinc-200">
+                <Phone className="w-4 h-4 text-[#25D366]" />
+                <span className="font-bold">Collected WhatsApp Numbers:</span>
+                <span className="px-2 py-0.5 rounded-full bg-[#25D366]/20 text-[#25D366] text-[10px] font-bold border border-[#25D366]/30">
+                  {validPhones.length} {validPhones.length === 1 ? 'Number' : 'Numbers'}
+                </span>
+                <span className="text-zinc-500 text-[10px] hidden sm:inline">&bull; from outreach contacts</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!commaText) return;
+                    navigator.clipboard.writeText(commaText);
+                    setCopiedFormat('comma');
+                    showToast(`Copied ${validPhones.length} phone numbers!`);
+                    setTimeout(() => setCopiedFormat(null), 2000);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#25D366] hover:bg-[#20ba5a] text-black transition-all shadow-sm"
+                >
+                  {copiedFormat === 'comma' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedFormat === 'comma' ? 'Copied!' : 'Copy All Numbers'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowNumbersCard((prev) => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold border border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800 transition-all"
+                >
+                  <FileText className="w-3.5 h-3.5 text-[#25D366]" />
+                  <span>{showNumbersCard ? 'Hide Collection' : 'View Collection'}</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showNumbersCard ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Expanded Content Panel */}
+            {showNumbersCard && (
+              <div className="p-4 space-y-3 bg-[#0D0F12] border-t border-[#242930] animate-in fade-in duration-150">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#242930] pb-2 font-mono text-[11px]">
+                  {/* Format selector */}
+                  <div className="flex bg-[#15181D] p-0.5 rounded-lg border border-[#242930]">
+                    <button
+                      type="button"
+                      onClick={() => setNumberFormat('comma')}
+                      className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                        numberFormat === 'comma' ? 'bg-[#25D366] text-black' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Comma-Separated
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNumberFormat('lines')}
+                      className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                        numberFormat === 'lines' ? 'bg-[#25D366] text-black' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Line-by-Line
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNumberFormat('clean')}
+                      className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                        numberFormat === 'clean' ? 'bg-[#25D366] text-black' : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      Digits Only
+                    </button>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!displayText) return;
+                        navigator.clipboard.writeText(displayText);
+                        setCopiedFormat(numberFormat);
+                        showToast(`Copied ${validPhones.length} numbers (${numberFormat})!`);
+                        setTimeout(() => setCopiedFormat(null), 2000);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                        copiedFormat === numberFormat
+                          ? 'bg-[#25D366] text-black'
+                          : 'bg-[#1F2329] hover:bg-[#282D35] text-zinc-200 border border-[#242930]'
+                      }`}
+                    >
+                      {copiedFormat === numberFormat ? <Check className="w-3 h-3 text-black" /> : <Copy className="w-3 h-3 text-[#25D366]" />}
+                      <span>{copiedFormat === numberFormat ? 'Copied!' : `Copy (${numberFormat})`}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!waLinksText) return;
+                        navigator.clipboard.writeText(waLinksText);
+                        setCopiedFormat('links');
+                        showToast(`Copied ${validPhones.length} wa.me chat links!`);
+                        setTimeout(() => setCopiedFormat(null), 2000);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                        copiedFormat === 'links'
+                          ? 'bg-[#25D366] text-black'
+                          : 'bg-[#1F2329] hover:bg-[#282D35] text-sky-300 border border-[#242930]'
+                      }`}
+                    >
+                      <Link2 className="w-3 h-3 text-sky-400" />
+                      <span>{copiedFormat === 'links' ? 'Links Copied!' : 'Copy wa.me Links'}</span>
+                    </button>
+
+                    {(() => {
+                      const unshared = getUnsharedItems('phone', validPhones);
+                      const isAllShared = validPhones.length > 0 && unshared.length === 0;
+                      return (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (unshared.length === 0) {
+                              showToast('✓ All phone numbers from this list are already shared to Global Space!');
+                              return;
+                            }
+                            const title = `WhatsApp Contact Numbers (${unshared.length} New)`;
+                            const res = await shareToGlobal('phone', title, unshared);
+                            if (res) {
+                              showToast(`✓ Shared ${unshared.length} new phone number${unshared.length > 1 ? 's' : ''} to Global Space!`);
+                            } else {
+                              showToast('Failed to share to Global Space.');
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#1F2329] hover:bg-[#282D35] text-[#25D366] border border-[#242930] transition-colors"
+                        >
+                          <Globe className="w-3 h-3 text-[#25D366]" />
+                          <span>
+                            {isAllShared
+                              ? '✓ All Shared to Global'
+                              : unshared.length < validPhones.length
+                              ? `Share ${unshared.length} New to Global`
+                              : 'Share to Global Space'}
+                          </span>
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <textarea
+                  readOnly
+                  value={displayText}
+                  rows={Math.min(8, Math.max(3, validPhones.length))}
+                  className="w-full bg-[#15181D] border border-[#242930] rounded-lg p-3 text-xs text-[#25D366] font-mono leading-relaxed outline-none select-all focus:border-[#25D366]"
+                />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* WhatsApp Masonry Card Grid */}
       <div className="space-y-4">

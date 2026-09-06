@@ -8,6 +8,7 @@ import { useWhatsApp, buildWhatsAppLink, DEFAULT_WHATSAPP_TEMPLATE } from '@/lib
 import { useJobApplications, type JobApplication } from '@/lib/hooks/useJobApplications';
 import { useImageApplications, type ImageApplication } from '@/lib/hooks/useImageApplications';
 import { useEmailPreferences, type EmailPreferences } from '@/lib/hooks/useEmailPreferences';
+import { useGlobalSpace } from '@/lib/hooks/useGlobalSpace';
 import {
   Sparkles,
   Copy,
@@ -62,6 +63,7 @@ export default function AiExtractorPage() {
   const supabase = createClient();
   const { emails: existingEmails, addEmail } = useEmails();
   const { batches: waBatches, addBatchContacts } = useWhatsApp();
+  const { shareToGlobal, getUnsharedItems } = useGlobalSpace();
 
   // Hook for persistent Database-backed Job Applications
   const {
@@ -153,6 +155,18 @@ export default function AiExtractorPage() {
   const [importPasscode, setImportPasscode] = useState('');
   const [importError, setImportError] = useState('');
   const [importLoading, setImportLoading] = useState(false);
+
+  // Custom Controls toggle state
+  const [showCustomButtons, setShowCustomButtons] = useState(false);
+
+  // Email Collection Card States for LinkedIn & Image Tabs
+  const [showLinkedInEmailsCard, setShowLinkedInEmailsCard] = useState(false);
+  const [linkedInEmailFormat, setLinkedInEmailFormat] = useState<'comma' | 'lines'>('comma');
+  const [copiedLinkedInFormat, setCopiedLinkedInFormat] = useState<string | null>(null);
+
+  const [showImageEmailsCard, setShowImageEmailsCard] = useState(false);
+  const [imageEmailFormat, setImageEmailFormat] = useState<'comma' | 'lines'>('comma');
+  const [copiedImageFormat, setCopiedImageFormat] = useState<string | null>(null);
 
   // Load saved Groq API key from localStorage
   useEffect(() => {
@@ -559,68 +573,87 @@ export default function AiExtractorPage() {
               <span className="text-[#7FE7C4] font-bold">{imageStats.completed} completed</span>
             </div>
           )}
-          {activeTab === 'job_applications' && (
+          {/* Custom Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setShowCustomButtons((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border transition-colors ${
+              showCustomButtons
+                ? 'bg-[#89295E] text-white border-[#89295E]'
+                : 'border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <Settings2 className="w-3 h-3" />
+            <span>Custom</span>
+          </button>
+
+          {/* Hidden Action Buttons revealed on clicking Custom */}
+          {showCustomButtons && (
             <>
-              {isSelectionMode ? (
+              {activeTab === 'job_applications' && (
                 <>
+                  {isSelectionMode ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          const allSelected = selectedIds.size === filteredJobCards.length;
+                          if (allSelected) {
+                            clearSelection();
+                          } else {
+                            selectAll();
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                      >
+                        <div className={`w-3 h-3 rounded border flex items-center justify-center ${
+                          selectedIds.size === filteredJobCards.length ? 'bg-[#89295E] border-[#89295E]' : 'border-zinc-600'
+                        }`}>
+                          {selectedIds.size === filteredJobCards.length && <span className="text-white text-[8px] font-bold">✓</span>}
+                        </div>
+                        <span>{selectedIds.size === filteredJobCards.length ? 'Deselect All' : 'Select All'}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsSelectionMode(false);
+                          clearSelection();
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                      >
+                        <span>Cancel Selection</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setIsSelectionMode(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                    >
+                      <span>Select</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
-                      const allSelected = selectedIds.size === filteredJobCards.length;
-                      if (allSelected) {
-                        clearSelection();
-                      } else {
-                        selectAll();
-                      }
+                      setImportShareKey('');
+                      setImportPasscode('');
+                      setImportError('');
+                      setIsImportModalOpen(true);
                     }}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
+                    title="Import shared cards/bundle"
                   >
-                    <div className={`w-3 h-3 rounded border flex items-center justify-center ${
-                      selectedIds.size === filteredJobCards.length ? 'bg-[#89295E] border-[#89295E]' : 'border-zinc-600'
-                    }`}>
-                      {selectedIds.size === filteredJobCards.length && <span className="text-white text-[8px] font-bold">✓</span>}
-                    </div>
-                    <span>{selectedIds.size === filteredJobCards.length ? 'Deselect All' : 'Select All'}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsSelectionMode(false);
-                      clearSelection();
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
-                  >
-                    <span>Cancel Selection</span>
+                    <Download className="w-3 h-3 text-[#ff8ac8]" />
+                    <span>Import Shared</span>
                   </button>
                 </>
-              ) : (
-                <button
-                  onClick={() => setIsSelectionMode(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
-                >
-                  <span>Select</span>
-                </button>
               )}
               <button
-                onClick={() => {
-                  setImportShareKey('');
-                  setImportPasscode('');
-                  setImportError('');
-                  setIsImportModalOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-300 hover:bg-zinc-800 transition-colors w-fit"
-                title="Import shared cards/bundle"
+                onClick={() => setShowKeyModal(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border transition-colors bg-[#7FE7C4]/10 text-[#7FE7C4] border-[#7FE7C4]/30 hover:bg-[#7FE7C4]/20 w-fit"
               >
-                <Download className="w-3 h-3 text-[#ff8ac8]" />
-                <span>Import Shared</span>
+                <KeyRound className="w-3 h-3" />
+                <span>GROQ LLaMA-3.3 ACTIVE</span>
               </button>
             </>
           )}
-          <button
-            onClick={() => setShowKeyModal(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border transition-colors bg-[#7FE7C4]/10 text-[#7FE7C4] border-[#7FE7C4]/30 hover:bg-[#7FE7C4]/20 w-fit"
-          >
-            <KeyRound className="w-3 h-3" />
-            <span>GROQ LLaMA-3.3 ACTIVE</span>
-          </button>
         </div>
       </div>
 
@@ -910,27 +943,171 @@ export default function AiExtractorPage() {
             />
           )}
 
-          {/* Action Bar: Copy All Emails from Existing Cards */}
-          {savedJobCards.length > 0 && (
-            <div className="flex items-center justify-between bg-[#15181D] border border-[#242930] rounded-xl p-3">
-              <div className="flex items-center gap-2 font-mono text-xs text-zinc-400">
-                <Mail className="w-3.5 h-3.5 text-[#7FE7C4]" />
-                <span className="font-bold">All Emails from Cards:</span>
-                <span className="text-zinc-200">{savedJobCards.length} cards</span>
+          {/* Action Bar: All Collected Emails Card (LinkedIn Tab) */}
+          {savedJobCards.length > 0 && (() => {
+            const validLinkedInEmails = Array.from(
+              new Set(savedJobCards.map(c => c.to_email?.trim()).filter((e): e is string => !!e && e.includes('@')))
+            );
+            const commaText = validLinkedInEmails.join(', ');
+            const linesText = validLinkedInEmails.join('\n');
+            const displayText = linkedInEmailFormat === 'comma' ? commaText : linesText;
+            const mailtoBccUrl = validLinkedInEmails.length > 0 ? `mailto:?bcc=${encodeURIComponent(commaText)}` : '';
+
+            return (
+              <div className="bg-[#15181D] border border-[#89295E]/40 rounded-xl overflow-hidden shadow-lg transition-all">
+                {/* Header Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-[#1A1D24] border-b border-[#242930]">
+                  <div className="flex items-center gap-2 font-mono text-xs text-zinc-200">
+                    <Mail className="w-4 h-4 text-[#7FE7C4]" />
+                    <span className="font-bold">Collected Emails:</span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#7FE7C4]/20 text-[#7FE7C4] text-[10px] font-bold border border-[#7FE7C4]/30">
+                      {validLinkedInEmails.length} {validLinkedInEmails.length === 1 ? 'Email' : 'Emails'}
+                    </span>
+                    <span className="text-zinc-500 text-[10px] hidden sm:inline">&bull; from {savedJobCards.length} cards</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!commaText) return;
+                        navigator.clipboard.writeText(commaText);
+                        setCopiedLinkedInFormat('comma');
+                        showNotification(`Copied ${validLinkedInEmails.length} emails!`);
+                        setTimeout(() => setCopiedLinkedInFormat(null), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-all shadow-sm"
+                    >
+                      {copiedLinkedInFormat === 'comma' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedLinkedInFormat === 'comma' ? 'Copied!' : 'Copy All Emails'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowLinkedInEmailsCard((prev) => !prev)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold border border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800 transition-all"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-[#ff8ac8]" />
+                      <span>{showLinkedInEmailsCard ? 'Hide Collection' : 'View Collection'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showLinkedInEmailsCard ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded Card Content */}
+                {showLinkedInEmailsCard && (
+                  <div className="p-4 space-y-3 bg-[#0D0F12] border-t border-[#242930] animate-in fade-in duration-150">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#242930] pb-2 font-mono text-[11px]">
+                      {/* Format selector */}
+                      <div className="flex bg-[#15181D] p-0.5 rounded-lg border border-[#242930]">
+                        <button
+                          type="button"
+                          onClick={() => setLinkedInEmailFormat('comma')}
+                          className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                            linkedInEmailFormat === 'comma' ? 'bg-[#89295E] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          Comma-Separated
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLinkedInEmailFormat('lines')}
+                          className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                            linkedInEmailFormat === 'lines' ? 'bg-[#89295E] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          Line-by-Line
+                        </button>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!displayText) return;
+                            navigator.clipboard.writeText(displayText);
+                            setCopiedLinkedInFormat(linkedInEmailFormat);
+                            showNotification(`Copied ${validLinkedInEmails.length} emails (${linkedInEmailFormat})!`);
+                            setTimeout(() => setCopiedLinkedInFormat(null), 2000);
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            copiedLinkedInFormat === linkedInEmailFormat
+                              ? 'bg-[#7FE7C4] text-black'
+                              : 'bg-[#1F2329] hover:bg-[#282D35] text-zinc-200 border border-[#242930]'
+                          }`}
+                        >
+                          {copiedLinkedInFormat === linkedInEmailFormat ? <Check className="w-3 h-3 text-black" /> : <Copy className="w-3 h-3 text-[#7FE7C4]" />}
+                          <span>{copiedLinkedInFormat === linkedInEmailFormat ? 'Copied!' : `Copy (${linkedInEmailFormat === 'comma' ? 'Comma' : 'Lines'})`}</span>
+                        </button>
+
+                        <a
+                          href={mailtoBccUrl}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#1F2329] hover:bg-[#282D35] text-sky-300 border border-[#242930] transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3 text-sky-400" />
+                          <span>Open in Mail (BCC)</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const batchTitle = `${new Date().getDate()} ${new Date().toLocaleDateString('en-US', { month: 'short' })} LinkedIn Emails`;
+                            await addEmail(batchTitle, 'AI Extracted', commaText);
+                            showNotification(`Saved "${batchTitle}" in Emails tab!`);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Save to Emails Tab</span>
+                        </button>
+
+                        {(() => {
+                          const unshared = getUnsharedItems('email', validLinkedInEmails);
+                          const isAllShared = validLinkedInEmails.length > 0 && unshared.length === 0;
+                          return (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (unshared.length === 0) {
+                                  showNotification('✓ All emails from this list are already shared to Global Space!');
+                                  return;
+                                }
+                                const title = `LinkedIn Cold Outreach Emails (${unshared.length} New)`;
+                                const res = await shareToGlobal('email', title, unshared);
+                                if (res) {
+                                  showNotification(`✓ Shared ${unshared.length} new email${unshared.length > 1 ? 's' : ''} to Global Space!`);
+                                } else {
+                                  showNotification('Failed to share to Global Space.');
+                                }
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#1F2329] hover:bg-[#282D35] text-[#ff8ac8] border border-[#242930] transition-colors"
+                            >
+                              <Globe className="w-3 h-3 text-[#ff8ac8]" />
+                              <span>
+                                {isAllShared
+                                  ? '✓ All Shared to Global'
+                                  : unshared.length < validLinkedInEmails.length
+                                  ? `Share ${unshared.length} New to Global`
+                                  : 'Share to Global Space'}
+                              </span>
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    <textarea
+                      readOnly
+                      value={displayText}
+                      rows={Math.min(8, Math.max(3, validLinkedInEmails.length))}
+                      className="w-full bg-[#15181D] border border-[#242930] rounded-lg p-3 text-xs text-[#7FE7C4] font-mono leading-relaxed outline-none select-all focus:border-[#89295E]"
+                    />
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const allEmails = savedJobCards.map(card => card.to_email).filter(email => email).join(', ');
-                  copyToClipboard(allEmails, 'all-cards', 'email', 'All Card Emails');
-                }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-colors"
-              >
-                <Copy className="w-4 h-4" />
-                <span>Copy All Emails</span>
-              </button>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Search & Filter Bar for Generated Cards */}
           <div className="flex flex-col sm:flex-row gap-2">
@@ -1576,6 +1753,172 @@ export default function AiExtractorPage() {
               </button>
             </div>
           </div>
+
+          {/* Action Bar: All Collected Emails Card (Images Tab) */}
+          {savedImageCards.length > 0 && (() => {
+            const validImageEmails = Array.from(
+              new Set(savedImageCards.map(c => c.to_email?.trim()).filter((e): e is string => !!e && e.includes('@')))
+            );
+            const commaText = validImageEmails.join(', ');
+            const linesText = validImageEmails.join('\n');
+            const displayText = imageEmailFormat === 'comma' ? commaText : linesText;
+            const mailtoBccUrl = validImageEmails.length > 0 ? `mailto:?bcc=${encodeURIComponent(commaText)}` : '';
+
+            return (
+              <div className="bg-[#15181D] border border-[#89295E]/40 rounded-xl overflow-hidden shadow-lg transition-all">
+                {/* Header Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-[#1A1D24] border-b border-[#242930]">
+                  <div className="flex items-center gap-2 font-mono text-xs text-zinc-200">
+                    <Mail className="w-4 h-4 text-[#7FE7C4]" />
+                    <span className="font-bold">Collected Image Emails:</span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#7FE7C4]/20 text-[#7FE7C4] text-[10px] font-bold border border-[#7FE7C4]/30">
+                      {validImageEmails.length} {validImageEmails.length === 1 ? 'Email' : 'Emails'}
+                    </span>
+                    <span className="text-zinc-500 text-[10px] hidden sm:inline">&bull; from {savedImageCards.length} cards</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!commaText) return;
+                        navigator.clipboard.writeText(commaText);
+                        setCopiedImageFormat('comma');
+                        showNotification(`Copied ${validImageEmails.length} emails!`);
+                        setTimeout(() => setCopiedImageFormat(null), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-all shadow-sm"
+                    >
+                      {copiedImageFormat === 'comma' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedImageFormat === 'comma' ? 'Copied!' : 'Copy All Emails'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowImageEmailsCard((prev) => !prev)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold border border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800 transition-all"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-[#ff8ac8]" />
+                      <span>{showImageEmailsCard ? 'Hide Collection' : 'View Collection'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showImageEmailsCard ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded Card Content */}
+                {showImageEmailsCard && (
+                  <div className="p-4 space-y-3 bg-[#0D0F12] border-t border-[#242930] animate-in fade-in duration-150">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#242930] pb-2 font-mono text-[11px]">
+                      {/* Format selector */}
+                      <div className="flex bg-[#15181D] p-0.5 rounded-lg border border-[#242930]">
+                        <button
+                          type="button"
+                          onClick={() => setImageEmailFormat('comma')}
+                          className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                            imageEmailFormat === 'comma' ? 'bg-[#89295E] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          Comma-Separated
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setImageEmailFormat('lines')}
+                          className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                            imageEmailFormat === 'lines' ? 'bg-[#89295E] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          Line-by-Line
+                        </button>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!displayText) return;
+                            navigator.clipboard.writeText(displayText);
+                            setCopiedImageFormat(imageEmailFormat);
+                            showNotification(`Copied ${validImageEmails.length} emails (${imageEmailFormat})!`);
+                            setTimeout(() => setCopiedImageFormat(null), 2000);
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            copiedImageFormat === imageEmailFormat
+                              ? 'bg-[#7FE7C4] text-black'
+                              : 'bg-[#1F2329] hover:bg-[#282D35] text-zinc-200 border border-[#242930]'
+                          }`}
+                        >
+                          {copiedImageFormat === imageEmailFormat ? <Check className="w-3 h-3 text-black" /> : <Copy className="w-3 h-3 text-[#7FE7C4]" />}
+                          <span>{copiedImageFormat === imageEmailFormat ? 'Copied!' : `Copy (${imageEmailFormat === 'comma' ? 'Comma' : 'Lines'})`}</span>
+                        </button>
+
+                        <a
+                          href={mailtoBccUrl}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#1F2329] hover:bg-[#282D35] text-sky-300 border border-[#242930] transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3 text-sky-400" />
+                          <span>Open in Mail (BCC)</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const batchTitle = `${new Date().getDate()} ${new Date().toLocaleDateString('en-US', { month: 'short' })} Image Emails`;
+                            await addEmail(batchTitle, 'AI Extracted', commaText);
+                            showNotification(`Saved "${batchTitle}" in Emails tab!`);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#89295E] hover:bg-[#a03672] text-white transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Save to Emails Tab</span>
+                        </button>
+
+                        {(() => {
+                          const unshared = getUnsharedItems('email', validImageEmails);
+                          const isAllShared = validImageEmails.length > 0 && unshared.length === 0;
+                          return (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (unshared.length === 0) {
+                                  showNotification('✓ All emails from this list are already shared to Global Space!');
+                                  return;
+                                }
+                                const title = `Image Extracted Emails (${unshared.length} New)`;
+                                const res = await shareToGlobal('email', title, unshared);
+                                if (res) {
+                                  showNotification(`✓ Shared ${unshared.length} new email${unshared.length > 1 ? 's' : ''} to Global Space!`);
+                                } else {
+                                  showNotification('Failed to share to Global Space.');
+                                }
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-bold bg-[#1F2329] hover:bg-[#282D35] text-[#ff8ac8] border border-[#242930] transition-colors"
+                            >
+                              <Globe className="w-3 h-3 text-[#ff8ac8]" />
+                              <span>
+                                {isAllShared
+                                  ? '✓ All Shared to Global'
+                                  : unshared.length < validImageEmails.length
+                                  ? `Share ${unshared.length} New to Global`
+                                  : 'Share to Global Space'}
+                              </span>
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    <textarea
+                      readOnly
+                      value={displayText}
+                      rows={Math.min(8, Math.max(3, validImageEmails.length))}
+                      className="w-full bg-[#15181D] border border-[#242930] rounded-lg p-3 text-xs text-[#7FE7C4] font-mono leading-relaxed outline-none select-all focus:border-[#89295E]"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Generated Image Cards (similar to job_applications but separate) */}
           <div className="space-y-4">

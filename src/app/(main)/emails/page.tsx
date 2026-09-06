@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useEmails, type Email } from '@/lib/hooks/useEmails';
+import { useGlobalSpace } from '@/lib/hooks/useGlobalSpace';
 import { MultiSelectBar } from '@/components/MultiSelectBar';
-import { Copy, Plus, Trash2, CopyPlus, Search, CheckCircle2, Circle, Clock, Mail, Share2, Download, KeyRound, Lock } from 'lucide-react';
+import { Copy, Plus, Trash2, CopyPlus, Search, CheckCircle2, Circle, Clock, Mail, Share2, Download, KeyRound, Lock, Globe } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function EmailsPage() {
   const { emails, loading, addEmail, updateEmail, deleteEmail, duplicateEmail, shareEmails, importEmails } = useEmails();
+  const { shareToGlobal, getUnsharedItems } = useGlobalSpace();
   
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
@@ -298,6 +300,8 @@ export default function EmailsPage() {
             onDelete={setEmailToDelete}
             onDuplicate={duplicateEmail}
             onCopy={showToast}
+            onShareToGlobal={shareToGlobal}
+            getUnsharedItems={getUnsharedItems}
             isSelected={selectedIds.has(email.id)}
             onToggleSelect={toggleSelect}
             showCheckbox={isSelectionMode}
@@ -554,6 +558,8 @@ function EmailCard({
   onDelete, 
   onDuplicate,
   onCopy,
+  onShareToGlobal,
+  getUnsharedItems,
   isSelected,
   onToggleSelect,
   showCheckbox,
@@ -563,6 +569,8 @@ function EmailCard({
   onDelete: (id: string) => void,
   onDuplicate: (email: Email) => void,
   onCopy: (msg: string) => void,
+  onShareToGlobal: (type: 'email' | 'phone', title: string, items: string[]) => Promise<any>,
+  getUnsharedItems?: (type: 'email' | 'phone', items: string[]) => string[],
   isSelected: boolean,
   onToggleSelect: (id: string) => void,
   showCheckbox: boolean,
@@ -702,11 +710,48 @@ function EmailCard({
           </button>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1F2329] hover:bg-zinc-800 border border-[#242930] text-zinc-200 text-[10px] font-mono font-bold uppercase tracking-wider transition-all active:scale-[0.98] ml-1"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1F2329] hover:bg-zinc-800 border border-[#242930] text-zinc-200 text-[10px] font-mono font-bold uppercase tracking-wider transition-all active:scale-[0.98]"
           >
             <Copy className="w-3.5 h-3.5" />
-            Copy Content
+            Copy
           </button>
+          {(() => {
+            const matches = content.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g) || [];
+            const itemsToShare = matches.length > 0 ? matches : content.split(/\r?\n/).filter(l => l.trim());
+            const unsharedItems = getUnsharedItems ? getUnsharedItems('email', itemsToShare) : itemsToShare;
+            const isAllShared = itemsToShare.length > 0 && unsharedItems.length === 0;
+
+            return (
+              <button
+                onClick={async () => {
+                  if (itemsToShare.length === 0) {
+                    onCopy("No content or emails to share.");
+                    return;
+                  }
+                  if (unsharedItems.length === 0) {
+                    onCopy("✓ All items in this template are already shared to Global Space!");
+                    return;
+                  }
+                  const title = `${email.title || 'Email Template Collection'} (${unsharedItems.length} New)`;
+                  const res = await onShareToGlobal('email', title, unsharedItems);
+                  if (res) {
+                    onCopy(`✓ Shared ${unsharedItems.length} new item${unsharedItems.length > 1 ? 's' : ''} to Global Space!`);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1F2329] hover:bg-[#282D35] border border-[#242930] text-[#ff8ac8] text-[10px] font-mono font-bold uppercase tracking-wider transition-all active:scale-[0.98] ml-1"
+                title="Share to Global Space"
+              >
+                <Globe className="w-3.5 h-3.5 text-[#ff8ac8]" />
+                <span>
+                  {isAllShared
+                    ? '✓ All Shared'
+                    : unsharedItems.length < itemsToShare.length
+                    ? `Share ${unsharedItems.length} New`
+                    : 'Share Global'}
+                </span>
+              </button>
+            );
+          })()}
         </div>
       </div>
     </div>

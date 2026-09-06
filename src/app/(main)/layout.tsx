@@ -4,18 +4,22 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { CheckSquare, FileText, Calendar, LogOut, Terminal, Mail, ListTodo, Send, Coins, Bell, AlarmClock, Check, X, ChevronDown, Sparkles, MessageCircle } from 'lucide-react';
+import { CheckSquare, FileText, Calendar, LogOut, Terminal, Mail, ListTodo, Send, Coins, Bell, AlarmClock, Check, X, ChevronDown, Sparkles, MessageCircle, Globe } from 'lucide-react';
 import { CampaignProvider, useCampaign } from '@/lib/context/CampaignContext';
 import { useJobCallbacks } from '@/lib/hooks/useJobCallbacks';
 
-const tabs = [
+const mainTabs = [
   { href: '/daily-tasks', label: 'tasks', icon: CheckSquare },
   { href: '/notes', label: 'notes', icon: FileText },
-  { href: '/task-date', label: 'logs', icon: Calendar },
   { href: '/emails', label: 'emails', icon: Mail },
   { href: '/whatsapp', label: 'whatsapp', icon: MessageCircle },
   { href: '/ai', label: 'ai extractor', icon: Sparkles },
+  { href: '/global-space', label: 'global space', icon: Globe },
   { href: '/todos', label: 'schedules', icon: ListTodo },
+];
+
+const dropdownTabs = [
+  { href: '/task-date', label: 'logs', icon: Calendar },
   { href: '/finance', label: 'finance', icon: Coins },
   { href: '/campaigns', label: 'campaigns', icon: Send },
 ];
@@ -47,6 +51,12 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [snoozeOpenId, setSnoozeOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const activeDropdownItem = dropdownTabs.find((tab) => pathname === tab.href);
+  const isDropdownActive = !!activeDropdownItem;
+  const DropdownIcon = activeDropdownItem ? activeDropdownItem.icon : Calendar;
+  const dropdownLabel = activeDropdownItem ? activeDropdownItem.label : 'more';
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -97,7 +107,7 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
 
               {/* Nav Tabs */}
               <nav className="hidden md:flex gap-1.5 h-14 items-center font-mono">
-                {tabs.map((tab) => {
+                {mainTabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = pathname === tab.href;
                   return (
@@ -121,6 +131,56 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
                     </Link>
                   );
                 })}
+
+                {/* Combined Dropdown Tab for logs, finance & campaigns */}
+                <div className="relative">
+                  {dropdownOpen && (
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setDropdownOpen(false)}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDropdownOpen((prev) => !prev)}
+                    className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded text-[11px] font-bold tracking-wide transition-colors ${
+                      isDropdownActive
+                        ? 'bg-[#89295E] text-white border border-[#89295E]'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#15181D] border border-transparent'
+                    }`}
+                  >
+                    <DropdownIcon className="w-3.5 h-3.5" />
+                    <span>{dropdownLabel}</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${dropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {dropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-50 bg-[#15181D] border border-[#242930] rounded-xl shadow-2xl py-1 font-mono text-[11px] min-w-[160px] animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-1 text-[9px] font-bold text-zinc-500 uppercase tracking-wider border-b border-[#242930] mb-1">
+                        Logs &amp; Tools
+                      </div>
+                      {dropdownTabs.map((item) => {
+                        const ItemIcon = item.icon;
+                        const isItemActive = pathname === item.href;
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setDropdownOpen(false)}
+                            className={`flex items-center gap-2.5 px-3.5 py-2 font-bold transition-colors ${
+                              isItemActive
+                                ? 'bg-[#89295E] text-white'
+                                : 'text-zinc-300 hover:bg-[#1F2329] hover:text-white'
+                            }`}
+                          >
+                            <ItemIcon className="w-3.5 h-3.5" />
+                            <span>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </nav>
             </div>
 
@@ -223,8 +283,8 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Mobile Navigation Dock */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#15181D] border-t border-[#242930] p-1.5 flex justify-around font-mono">
-        {tabs.map((tab) => {
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#15181D] border-t border-[#242930] p-1 flex justify-around font-mono overflow-x-auto">
+        {[...mainTabs, ...dropdownTabs].map((tab) => {
           const Icon = tab.icon;
           const isActive = pathname === tab.href;
           return (
