@@ -24,7 +24,7 @@ import {
 import { ConfirmModal } from '@/components/ConfirmModal';
 
 export default function GlobalSpacePage() {
-  const { shares, loading, deleteGlobalShare } = useGlobalSpace();
+  const { shares, loading, error, deleteGlobalShare, fetchGlobalShares } = useGlobalSpace();
   const { addEmail } = useEmails();
   const { addBatchContacts } = useWhatsApp();
 
@@ -62,7 +62,29 @@ export default function GlobalSpacePage() {
         </div>
       )}
 
+      {/* Database Error Banner */}
+      {error && (
+        <div className="flex items-start gap-3 bg-red-950/60 border border-red-700/60 rounded-lg px-4 py-3 font-mono text-xs text-red-300">
+          <span className="text-red-400 font-bold text-sm mt-0.5">⚠</span>
+          <div className="flex-1">
+            <p className="font-bold text-red-300 mb-1">Global Space database not set up yet</p>
+            <p className="text-red-400/80 leading-relaxed">{error}</p>
+            <p className="text-red-400/70 mt-2">
+              Please run the <code className="bg-red-900/40 px-1 rounded">global_shares</code> SQL in your Supabase SQL Editor.
+              See the <strong>global_shares_setup instructions</strong> for the exact SQL to run.
+            </p>
+            <button
+              onClick={fetchGlobalShares}
+              className="mt-2 px-3 py-1 rounded bg-red-800/50 hover:bg-red-700/50 text-red-200 text-[10px] font-bold transition-colors"
+            >
+              Retry Connection
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Page Header Strip */}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#242930] gap-3 font-mono text-xs text-zinc-400">
         <div className="flex items-center gap-2">
           <Globe className="w-4 h-4 text-[#89295E]" />

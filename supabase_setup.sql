@@ -478,3 +478,32 @@ begin
   );
 end;
 $$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- global_shares table — shared across ALL users (Global Space feature)
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists global_shares (
+  id          text primary key,
+  type        text not null check (type in ('email', 'phone')),
+  title       text not null,
+  sender_name text not null,
+  user_id     uuid references auth.users,
+  items       text[] not null,
+  created_at  timestamptz default now()
+);
+
+alter table global_shares enable row level security;
+
+-- ALL authenticated users can READ all global shares (truly global — cross-account, cross-device)
+create policy "All users can read global shares" on global_shares
+  for select using (auth.role() = 'authenticated');
+
+-- Any authenticated user can INSERT their own shares
+create policy "Users can insert global shares" on global_shares
+  for insert with check (auth.role() = 'authenticated');
+
+-- Users can only DELETE their own shares
+create policy "Users can delete own global shares" on global_shares
+  for delete using (auth.uid() = user_id);
+
