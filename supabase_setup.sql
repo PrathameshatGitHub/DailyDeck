@@ -507,3 +507,20 @@ create policy "Users can insert global shares" on global_shares
 create policy "Users can delete own global shares" on global_shares
   for delete using (auth.uid() = user_id);
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- user_whatsapp_config table — stores per-user custom WhatsApp pitch template
+-- Run this in Supabase SQL Editor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists user_whatsapp_config (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid references auth.users not null unique,
+  template     text not null,
+  updated_at   timestamptz default now(),
+  created_at   timestamptz default now()
+);
+
+alter table user_whatsapp_config enable row level security;
+create policy "Users manage own whatsapp config" on user_whatsapp_config
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+

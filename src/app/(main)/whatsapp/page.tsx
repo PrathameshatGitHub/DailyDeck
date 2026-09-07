@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   useWhatsApp,
   type WhatsAppContact,
@@ -39,6 +39,9 @@ export default function WhatsAppOutreachPage() {
   const {
     contacts,
     loading,
+    template,
+    savingTemplate,
+    saveTemplate,
     stats,
     batches,
     addContact,
@@ -58,16 +61,23 @@ export default function WhatsAppOutreachPage() {
   const [singleName, setSingleName] = useState('');
   const [singlePhone, setSinglePhone] = useState('');
   const [singleCompany, setSingleCompany] = useState('');
-  const [singleMessage, setSingleMessage] = useState(DEFAULT_WHATSAPP_TEMPLATE);
+  const [singleMessage, setSingleMessage] = useState(template);
 
   // Bulk paste form
   const [bulkText, setBulkText] = useState('');
   const [bulkBatchTitle, setBulkBatchTitle] = useState('');
-  const [bulkMessage, setBulkMessage] = useState(DEFAULT_WHATSAPP_TEMPLATE);
+  const [bulkMessage, setBulkMessage] = useState(template);
 
   // Template editor modal
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [customDefaultTemplate, setCustomDefaultTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
+  const [customDefaultTemplate, setCustomDefaultTemplate] = useState(template);
+
+  // Keep local template state synced when loaded from DB/cache
+  useEffect(() => {
+    setCustomDefaultTemplate(template);
+    setSingleMessage(template);
+    setBulkMessage(template);
+  }, [template]);
 
   // Search & Filter
   const [search, setSearch] = useState('');
@@ -501,7 +511,7 @@ export default function WhatsAppOutreachPage() {
         const commaText = validPhones.map(p => p.startsWith('+') ? p : `+${p}`).join(', ');
         const linesText = validPhones.map(p => p.startsWith('+') ? p : `+${p}`).join('\n');
         const cleanText = validPhones.map(p => p.replace(/\D/g, '')).join(', ');
-        const waLinksText = validPhones.map(p => buildWhatsAppLink(p, DEFAULT_WHATSAPP_TEMPLATE)).join('\n');
+        const waLinksText = validPhones.map(p => buildWhatsAppLink(p, template || DEFAULT_WHATSAPP_TEMPLATE)).join('\n');
 
         const displayText = numberFormat === 'comma' ? commaText : numberFormat === 'lines' ? linesText : cleanText;
 
@@ -851,7 +861,23 @@ export default function WhatsAppOutreachPage() {
                 onClick={() => setShowTemplateModal(false)}
                 className="px-3 py-1.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1F2329]"
               >
-                Done
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingTemplate || !customDefaultTemplate.trim()}
+                onClick={async () => {
+                  const ok = await saveTemplate(customDefaultTemplate);
+                  if (ok) {
+                    showToast('✓ WhatsApp pitch template saved to Supabase!');
+                    setShowTemplateModal(false);
+                  } else {
+                    showToast('Failed to save pitch template');
+                  }
+                }}
+                className="px-4 py-1.5 rounded bg-[#25D366] hover:bg-[#20ba5a] text-black text-xs font-bold tracking-wide transition-all shadow disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {savingTemplate ? 'Saving...' : 'Save Pitch Template'}
               </button>
             </div>
           </div>

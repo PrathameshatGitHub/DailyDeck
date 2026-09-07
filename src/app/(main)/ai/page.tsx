@@ -62,7 +62,7 @@ export default function AiExtractorPage() {
   const router = useRouter();
   const supabase = createClient();
   const { emails: existingEmails, addEmail } = useEmails();
-  const { batches: waBatches, addBatchContacts } = useWhatsApp();
+  const { batches: waBatches, addBatchContacts, template: waTemplate } = useWhatsApp();
   const { shareToGlobal, getUnsharedItems } = useGlobalSpace();
 
   // Hook for persistent Database-backed Job Applications
@@ -1330,7 +1330,7 @@ export default function AiExtractorPage() {
                               <span className="font-mono text-xs text-[#25D366] font-bold">+{card.phone}</span>
                             </div>
                             <a
-                              href={buildWhatsAppLink(card.phone, DEFAULT_WHATSAPP_TEMPLATE)}
+                              href={buildWhatsAppLink(card.phone, waTemplate || DEFAULT_WHATSAPP_TEMPLATE)}
                               target="_blank"
                               rel="noreferrer"
                               className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#25D366] hover:bg-[#20ba5a] text-black text-[10px] font-mono font-bold transition-all"
@@ -2074,7 +2074,7 @@ export default function AiExtractorPage() {
                               <span className="font-mono text-xs text-[#25D366] font-bold">+{card.phone}</span>
                             </div>
                             <a
-                              href={buildWhatsAppLink(card.phone, DEFAULT_WHATSAPP_TEMPLATE)}
+                              href={buildWhatsAppLink(card.phone, waTemplate || DEFAULT_WHATSAPP_TEMPLATE)}
                               target="_blank"
                               rel="noreferrer"
                               className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#25D366] hover:bg-[#20ba5a] text-black text-[10px] font-mono font-bold transition-all"
@@ -2356,7 +2356,7 @@ export default function AiExtractorPage() {
                       Extracted WhatsApp Outreach Contacts:
                     </div>
                     {extractedPhones.map((phone, idx) => {
-                      const waLink = buildWhatsAppLink(phone, DEFAULT_WHATSAPP_TEMPLATE);
+                      const waLink = buildWhatsAppLink(phone, waTemplate || DEFAULT_WHATSAPP_TEMPLATE);
                       return (
                         <div key={idx} className="flex items-center justify-between p-2.5 bg-[#0D0F12] border border-[#242930] rounded-lg">
                           <div className="flex items-center gap-2 min-w-0">
@@ -2399,7 +2399,7 @@ export default function AiExtractorPage() {
                             <td className="py-2 px-3 text-right">
                               {entry.phone ? (
                                 <a
-                                  href={buildWhatsAppLink(entry.phone, DEFAULT_WHATSAPP_TEMPLATE)}
+                                  href={buildWhatsAppLink(entry.phone, waTemplate || DEFAULT_WHATSAPP_TEMPLATE)}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="inline-flex items-center gap-1 text-[10px] text-[#25D366] hover:underline"

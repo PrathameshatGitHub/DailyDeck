@@ -47,6 +47,74 @@ export function useWhatsApp() {
   const supabase = createClient();
   const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [template, setTemplate] = useState<string>(DEFAULT_WHATSAPP_TEMPLATE);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
+  // Load template from local cache first, then sync from Supabase
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('dailydeck_whatsapp_template');
+      if (cached) setTemplate(cached);
+    } catch {}
+  }, []);
+
+  const fetchTemplate = useCallback(async () => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) return;
+
+      const { data, error } = await supabase
+        .from('user_whatsapp_config')
+        .select('template')
+        .eq('user_id', userData.user.id)
+        .maybeSingle();
+
+      if (!error && data?.template) {
+        setTemplate(data.template);
+        try {
+          localStorage.setItem('dailydeck_whatsapp_template', data.template);
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Could not fetch whatsapp template from Supabase:', err);
+    }
+  }, [supabase]);
+
+  const saveTemplate = async (newTemplate: string): Promise<boolean> => {
+    const trimmed = newTemplate.trim();
+    if (!trimmed) return false;
+
+    setSavingTemplate(true);
+    setTemplate(trimmed);
+    try {
+      localStorage.setItem('dailydeck_whatsapp_template', trimmed);
+    } catch {}
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user) {
+        const { error } = await supabase
+          .from('user_whatsapp_config')
+          .upsert(
+            {
+              user_id: userData.user.id,
+              template: trimmed,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id' }
+          );
+
+        if (error) {
+          console.error('Error saving whatsapp template to Supabase:', error);
+        }
+      }
+    } catch (err) {
+      console.error('Exception saving whatsapp template:', err);
+    }
+
+    setSavingTemplate(false);
+    return true;
+  };
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -63,7 +131,8 @@ export function useWhatsApp() {
 
   useEffect(() => {
     fetchContacts();
-  }, [fetchContacts]);
+    fetchTemplate();
+  }, [fetchContacts, fetchTemplate]);
 
   const addContact = async (fields: {
     name?: string;
@@ -76,7 +145,7 @@ export function useWhatsApp() {
     if (!userData.user) return null;
 
     const cleanedPhone = cleanPhoneNumber(fields.phone);
-    const finalMessage = fields.message || DEFAULT_WHATSAPP_TEMPLATE;
+    const finalMessage = fields.message || template || DEFAULT_WHATSAPP_TEMPLATE;
 
     const { data, error } = await supabase
       .from('whatsapp_contacts')
@@ -111,7 +180,7 @@ export function useWhatsApp() {
       name: item.name || null,
       phone: cleanPhoneNumber(item.phone),
       company: item.company || null,
-      message: item.message || DEFAULT_WHATSAPP_TEMPLATE,
+      message: item.message || template || DEFAULT_WHATSAPP_TEMPLATE,
       batch_title: batchTitle,
       status: 'pending' as const,
     }));
@@ -189,6 +258,9 @@ export function useWhatsApp() {
   return {
     contacts,
     loading,
+    template,
+    savingTemplate,
+    saveTemplate,
     stats,
     batches,
     addContact,
