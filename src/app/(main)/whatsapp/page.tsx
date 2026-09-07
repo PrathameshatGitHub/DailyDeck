@@ -33,6 +33,7 @@ import {
   Globe
 } from 'lucide-react';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { MultiSelectBar } from '@/components/MultiSelectBar';
 
 export default function WhatsAppOutreachPage() {
   const { shareToGlobal, getUnsharedItems } = useGlobalSpace();
@@ -50,6 +51,8 @@ export default function WhatsAppOutreachPage() {
     markContacted,
     updateContact,
     deleteContact,
+    deleteContacts,
+    updateContactsStatus,
     deleteBatch,
   } = useWhatsApp();
 
@@ -78,6 +81,11 @@ export default function WhatsAppOutreachPage() {
     setSingleMessage(template);
     setBulkMessage(template);
   }, [template]);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   // Search & Filter
   const [search, setSearch] = useState('');
@@ -235,6 +243,42 @@ export default function WhatsAppOutreachPage() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length && filtered.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((c) => c.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    await deleteContacts(ids);
+    setSelectedIds(new Set());
+    setIsSelectionMode(false);
+    setConfirmBulkDelete(false);
+    showToast(`✓ Deleted ${ids.length} WhatsApp contacts`);
+  };
+
+  const handleBulkStatus = async (status: 'pending' | 'contacted') => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    await updateContactsStatus(ids, status);
+    setSelectedIds(new Set());
+    showToast(`✓ Marked ${ids.length} contacts as ${status === 'contacted' ? 'Contacted (Done)' : 'Pending'}`);
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto font-sans pb-16 relative">
       {/* Toast Notification */}
@@ -258,14 +302,58 @@ export default function WhatsAppOutreachPage() {
           <span className="text-[#25D366]">&bull; {stats.contacted} contacted</span>
         </div>
 
-        <button
-          onClick={() => setShowTemplateModal(true)}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1F2329] border border-[#242930] hover:border-zinc-600 text-zinc-300 text-[10px] font-bold transition-colors w-fit"
-        >
-          <FileText className="w-3 h-3 text-[#25D366]" />
-          <span>EDIT PITCH TEMPLATE</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Multi-Select Mode Toggle */}
+          <button
+            onClick={() => {
+              if (isSelectionMode) {
+                setIsSelectionMode(false);
+                setSelectedIds(new Set());
+              } else {
+                setIsSelectionMode(true);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold border transition-colors ${
+              isSelectionMode
+                ? 'bg-[#25D366]/20 text-[#25D366] border-[#25D366]/40'
+                : 'bg-[#1F2329] border-[#242930] hover:border-zinc-600 text-zinc-300'
+            }`}
+          >
+            {isSelectionMode ? <CheckCircle2 className="w-3 h-3 text-[#25D366]" /> : <Layers className="w-3 h-3 text-zinc-400" />}
+            <span>{isSelectionMode ? 'EXIT SELECTION' : 'SELECT CARDS'}</span>
+          </button>
+
+          {/* Select All Button */}
+          {isSelectionMode && filtered.length > 0 && (
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1F2329] border border-[#242930] hover:border-zinc-600 text-zinc-300 text-[10px] font-bold transition-colors"
+            >
+              {selectedIds.size === filtered.length ? <CheckCircle2 className="w-3 h-3 text-[#25D366]" /> : <Circle className="w-3 h-3" />}
+              <span>{selectedIds.size === filtered.length ? 'DESELECT ALL' : `SELECT ALL (${filtered.length})`}</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowTemplateModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1F2329] border border-[#242930] hover:border-zinc-600 text-zinc-300 text-[10px] font-bold transition-colors w-fit"
+          >
+            <FileText className="w-3 h-3 text-[#25D366]" />
+            <span>EDIT PITCH TEMPLATE</span>
+          </button>
+        </div>
       </div>
+
+      {/* Floating MultiSelect Action Bar */}
+      <MultiSelectBar
+        selectedCount={selectedIds.size}
+        totalCount={filtered.length}
+        completedLabel="Mark Contacted"
+        pendingLabel="Mark Pending"
+        onMarkCompleted={() => handleBulkStatus('contacted')}
+        onMarkPending={() => handleBulkStatus('pending')}
+        onDeleteSelected={() => setConfirmBulkDelete(true)}
+      />
 
       {/* Top Expandable Contact Creator */}
       <div className="max-w-2xl mx-auto">
@@ -693,30 +781,56 @@ export default function WhatsAppOutreachPage() {
         ) : (
           <div className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 gap-3.5">
             {filtered.map((contact) => {
+              const isSelected = selectedIds.has(contact.id);
               const isCopied = copiedId === contact.id;
               const isContacted = contact.status === 'contacted';
 
               return (
                 <div
                   key={contact.id}
+                  onClick={() => {
+                    if (isSelectionMode) toggleSelect(contact.id);
+                  }}
                   className={`break-inside-avoid mb-3.5 w-full group relative bg-[#15181D] hover:bg-[#181C22] border rounded-xl p-3.5 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-150 overflow-hidden ${
-                    isContacted
+                    isSelectionMode ? 'cursor-pointer' : ''
+                  } ${
+                    isSelected
+                      ? 'border-[#25D366] ring-1 ring-[#25D366]/40 bg-[#1A221E]'
+                      : isContacted
                       ? 'border-[#242930] opacity-80 hover:opacity-100'
                       : 'border-[#25D366]/40 hover:border-[#25D366]/80'
                   }`}
                 >
-                  {/* Top Header: Name/Phone + Batch Tag */}
+                  {/* Top Header: Checkbox + Name/Phone + Batch Tag */}
                   <div className="space-y-1 pb-2 border-b border-[#242930]/60">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        {contact.name ? (
-                          <>
-                            <h3 className="text-xs font-bold text-zinc-100 truncate">{contact.name}</h3>
-                            <p className="text-[10px] font-mono text-[#25D366] font-bold">+{contact.phone}</p>
-                          </>
-                        ) : (
-                          <h3 className="text-xs font-bold font-mono text-[#25D366]">+{contact.phone}</h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {(isSelectionMode || selectedIds.size > 0) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelect(contact.id);
+                            }}
+                            className="p-0.5 text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+                          >
+                            {isSelected ? (
+                              <CheckCircle2 className="w-4 h-4 text-[#25D366]" />
+                            ) : (
+                              <Circle className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+                            )}
+                          </button>
                         )}
+                        <div className="min-w-0">
+                          {contact.name ? (
+                            <>
+                              <h3 className="text-xs font-bold text-zinc-100 truncate">{contact.name}</h3>
+                              <p className="text-[10px] font-mono text-[#25D366] font-bold">+{contact.phone}</p>
+                            </>
+                          ) : (
+                            <h3 className="text-xs font-bold font-mono text-[#25D366]">+{contact.phone}</h3>
+                          )}
+                        </div>
                       </div>
 
                       {/* Status Toggle Badge */}
@@ -935,7 +1049,7 @@ export default function WhatsAppOutreachPage() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Single Contact Confirmation Modal */}
       <ConfirmModal
         isOpen={!!contactToDelete}
         title="Delete WhatsApp Contact"
@@ -948,6 +1062,15 @@ export default function WhatsAppOutreachPage() {
           }
         }}
         onCancel={() => setContactToDelete(null)}
+      />
+
+      {/* Bulk Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmBulkDelete}
+        title={`Delete ${selectedIds.size} WhatsApp Contacts`}
+        message={`Are you sure you want to delete ${selectedIds.size} selected contact cards? This action cannot be undone.`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
       />
     </div>
   );

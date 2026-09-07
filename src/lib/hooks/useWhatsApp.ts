@@ -239,6 +239,20 @@ export function useWhatsApp() {
     await supabase.from('whatsapp_contacts').delete().eq('id', id);
   };
 
+  const deleteContacts = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setContacts((prev) => prev.filter((c) => !ids.includes(c.id)));
+    await supabase.from('whatsapp_contacts').delete().in('id', ids);
+  };
+
+  const updateContactsStatus = async (ids: string[], status: 'pending' | 'contacted') => {
+    if (ids.length === 0) return;
+    setContacts((prev) =>
+      prev.map((c) => (ids.includes(c.id) ? { ...c, status } : c))
+    );
+    await supabase.from('whatsapp_contacts').update({ status }).in('id', ids);
+  };
+
   const deleteBatch = async (batchTitle: string) => {
     setContacts((prev) => prev.filter((c) => c.batch_title !== batchTitle));
     await supabase.from('whatsapp_contacts').delete().eq('batch_title', batchTitle);
@@ -269,6 +283,8 @@ export function useWhatsApp() {
     markContacted,
     updateContact,
     deleteContact,
+    deleteContacts,
+    updateContactsStatus,
     deleteBatch,
     fetchContacts,
   };
