@@ -75,31 +75,15 @@ function personalize(
   template: string,
   name: string | null,
   company: string | null,
-  email: string,
-  senderEmail: string
+  email: string
 ): string {
   // Fallback: use the part before @ as name if no name provided
   const resolvedName    = (name && name.trim())    ? name.trim()    : email.split('@')[0];
   const resolvedCompany = (company && company.trim()) ? company.trim() : '';
 
-  // Add more natural variations to reduce spam detection
-  let result = template
+  return template
     .replace(/\{name\}/gi,    resolvedName)
     .replace(/\{company\}/gi, resolvedCompany);
-
-  // Add random small variations to make each email unique
-  const variations = [
-    '',
-    '\n',
-    '  ',
-    '\n\n',
-  ];
-  const randomVariation = variations[Math.floor(Math.random() * variations.length)];
-
-  // Add CAN-SPAM compliance footer
-  const footer = `\n\n--\nTo unsubscribe from future emails, reply with "unsubscribe" in the subject line.\nThis message was sent by ${senderEmail || 'the sender'}.`;
-  
-  return result + randomVariation + footer;
 }
 
 export async function POST(req: Request) {
@@ -133,20 +117,18 @@ export async function POST(req: Request) {
       .gte('sent_at', thirtyDaysAgo.toISOString());
 
     // Calculate warm-up limit based on sending history
-    let DAILY_LIMIT = 50; // Starting limit for new accounts
+    let DAILY_LIMIT = 300; // Starting limit
     if (monthlyStats && monthlyStats.length > 0) {
       const daysActive = Math.ceil((new Date().getTime() - new Date(monthlyStats[0].sent_at).getTime()) / (1000 * 60 * 60 * 24));
       const totalSent = monthlyStats.length;
       
       // Gradual warm-up schedule
       if (daysActive >= 30 && totalSent >= 1000) {
-        DAILY_LIMIT = 400; // Established accounts
+        DAILY_LIMIT = 500; // Established accounts
       } else if (daysActive >= 14 && totalSent >= 300) {
-        DAILY_LIMIT = 200; // 2+ weeks
+        DAILY_LIMIT = 400; // 2+ weeks
       } else if (daysActive >= 7 && totalSent >= 100) {
-        DAILY_LIMIT = 100; // 1+ week
-      } else if (daysActive >= 3 && totalSent >= 30) {
-        DAILY_LIMIT = 75; // 3+ days
+        DAILY_LIMIT = 350; // 1+ week
       }
     }
 
@@ -244,15 +226,13 @@ export async function POST(req: Request) {
       campaign.subject,
       nextRecipient.recipient_name,
       nextRecipient.recipient_company,
-      nextRecipient.recipient_email,
-      smtp_user
+      nextRecipient.recipient_email
     );
     const personalizedBody = personalize(
       campaign.body,
       nextRecipient.recipient_name,
       nextRecipient.recipient_company,
-      nextRecipient.recipient_email,
-      smtp_user
+      nextRecipient.recipient_email
     );
 
     // 4. Build transporter
@@ -321,8 +301,6 @@ export async function POST(req: Request) {
           'X-Priority': '3',
           'X-MSMail-Priority': 'Normal',
           'Importance': 'Normal',
-          'Precedence': 'bulk',
-          'List-Unsubscribe': `<mailto:${smtp_user}?subject=unsubscribe>`,
         }
       });
 

@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     // 1. Get campaign status
     const { data: campaign, error: campaignError } = await supabase
       .from('email_campaigns')
-      .select('status, subject')
+      .select('status, subject, body')
       .eq('id', campaign_id)
       .single();
 
@@ -56,6 +56,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       campaign_status:   campaign.status,
       subject:           campaign.subject,
+      body:              campaign.body,
       total:             queue.length,
       pending,
       sent,

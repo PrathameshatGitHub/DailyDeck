@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Send, Play, Pause, AlertCircle, CheckCircle2, Lock, KeyRound,
-  Upload, FileSpreadsheet, X, Copy, Users, Info, Save, Check,
+  Upload, FileSpreadsheet, X, Copy, Users, Info, Save, Check, Edit3,
 } from 'lucide-react';
 import { useCampaign }                     from '@/lib/context/CampaignContext';
 import { RecipientCardItem, type RecipientCard } from '@/components/RecipientCard';
@@ -98,8 +98,34 @@ export default function CampaignsPage() {
     activeCampaignId, isRelayActive, status, lastEmailSent, relayError,
     allRecipients, attachments, setAttachments, sendingSpeed, setSendingSpeed,
     smtpConfig, configLoading, saveSmtpConfig,
-    startCampaign, toggleRelay, resetCampaign,
+    startCampaign, updateCampaignContent, toggleRelay, resetCampaign,
   } = useCampaign();
+
+  // In-progress campaign content editing
+  const [isEditingContent,  setIsEditingContent]  = useState(false);
+  const [editSubject,       setEditSubject]       = useState('');
+  const [editBody,          setEditBody]          = useState('');
+  const [isUpdatingContent, setIsUpdatingContent] = useState(false);
+  const [updateSuccess,     setUpdateSuccess]     = useState(false);
+
+  const handleSaveContent = async () => {
+    if (!editSubject.trim() || !editBody.trim()) {
+      alert('Subject and body cannot be empty.');
+      return;
+    }
+    setIsUpdatingContent(true);
+    const res = await updateCampaignContent(editSubject, editBody);
+    setIsUpdatingContent(false);
+    if (res.success) {
+      setUpdateSuccess(true);
+      setTimeout(() => {
+        setUpdateSuccess(false);
+        setIsEditingContent(false);
+      }, 1500);
+    } else {
+      alert(res.error || 'Failed to update campaign content');
+    }
+  };
 
   // ── Seed local draft state from DB config once loaded ────────────────────
   useEffect(() => {
@@ -810,6 +836,22 @@ export default function CampaignsPage() {
               </button>
               {status.campaign_status !== 'completed' && (
                 <button
+                  onClick={() => {
+                    setEditSubject(status.subject || subject);
+                    setEditBody(status.body || body);
+                    setIsEditingContent(!isEditingContent);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors border ${
+                    isEditingContent
+                      ? 'bg-[#E8B54D]/20 text-[#E8B54D] border-[#E8B54D]/40'
+                      : 'bg-[#1F2329] text-[#E8B54D] hover:bg-[#E8B54D]/10 border-[#242930] hover:border-[#E8B54D]/30'
+                  }`}
+                >
+                  <Edit3 className="w-3.5 h-3.5" /> {isEditingContent ? 'Close Editor' : 'Edit Content'}
+                </button>
+              )}
+              {status.campaign_status !== 'completed' && (
+                <button
                   onClick={() => toggleRelay(!isRelayActive)}
                   className={`flex items-center gap-2 px-4 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
                     isRelayActive
@@ -822,6 +864,87 @@ export default function CampaignsPage() {
               )}
             </div>
           </div>
+
+          {/* Edit Campaign Content Form */}
+          {isEditingContent && (
+            <div className="bg-[#1F2329] p-5 border border-[#E8B54D]/30 rounded-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#242930]">
+                <div className="flex items-center gap-2 font-mono text-xs text-[#E8B54D] uppercase font-bold tracking-wider">
+                  <Edit3 className="w-4 h-4" />
+                  Edit Campaign Content (Applies to Remaining Emails)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingContent(false)}
+                  className="text-zinc-500 hover:text-zinc-300"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 bg-[#0D0F12] border border-[#242930] px-3 py-2 rounded-lg text-xs font-mono text-zinc-400">
+                <Info className="w-4 h-4 text-[#E8B54D] shrink-0" />
+                <span>
+                  Updates apply immediately to all <strong className="text-[#E8B54D]">{status.pending} pending</strong> emails. Already sent emails won't be affected.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
+                  Subject
+                  <span className="ml-2 normal-case text-zinc-600">— supports {'{name}'} and {'{company}'}</span>
+                </label>
+                <input
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  placeholder="Subject line"
+                  className="w-full bg-[#15181D] px-3 py-2.5 rounded border border-[#242930] outline-none focus:border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
+                  Body Content
+                  <span className="ml-2 normal-case text-zinc-600">— supports {'{name}'} and {'{company}'}</span>
+                </label>
+                <textarea
+                  value={editBody}
+                  onChange={e => setEditBody(e.target.value)}
+                  placeholder="Email body"
+                  rows={8}
+                  className="w-full bg-[#15181D] px-3 py-2.5 rounded border border-[#242930] outline-none focus:border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 font-sans resize-none leading-relaxed"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingContent(false)}
+                  className="px-4 py-2 rounded bg-[#15181D] hover:bg-zinc-800 border border-[#242930] text-zinc-400 text-xs font-mono font-bold uppercase transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveContent}
+                  disabled={isUpdatingContent}
+                  className="px-5 py-2 rounded bg-[#89295E] hover:bg-[#a03672] text-white text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isUpdatingContent ? (
+                    'Saving...'
+                  ) : updateSuccess ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-[#7FE7C4]" /> Saved & Applied!
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Save & Apply
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Progress bar */}
           <div className="space-y-2">

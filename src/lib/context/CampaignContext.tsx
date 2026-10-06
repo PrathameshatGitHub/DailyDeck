@@ -11,6 +11,7 @@ interface CampaignStatus {
   failed: number;
   campaign_status: string;
   subject?: string;
+  body?: string;
 }
 
 interface Attachment {
@@ -49,6 +50,7 @@ interface CampaignContextType {
     recipients: string | RecipientCard[],
     replyTo:    string
   ) => Promise<boolean>;
+  updateCampaignContent: (subject: string, body: string) => Promise<{ success: boolean; error?: string }>;
   toggleRelay:   (active: boolean) => void;
   resetCampaign: () => void;
 }
@@ -194,6 +196,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
           failed:          data.failed,
           campaign_status: data.campaign_status,
           subject:         data.subject,
+          body:            data.body,
         });
 
         const combined: RecipientCard[] = [
@@ -314,6 +317,26 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateCampaignContent = async (newSubject: string, newBody: string): Promise<{ success: boolean; error?: string }> => {
+    if (!activeCampaignId) return { success: false, error: 'No active campaign' };
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/campaigns/update', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body:    JSON.stringify({ campaign_id: activeCampaignId, subject: newSubject, content: newBody }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { success: false, error: data.error || 'Failed to update campaign' };
+      }
+      setStatus(prev => ({ ...prev, subject: newSubject, body: newBody }));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
   const toggleRelay = (active: boolean) => setIsRelayActive(active);
 
   const resetCampaign = () => {
@@ -345,6 +368,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         configLoading,
         saveSmtpConfig,
         startCampaign,
+        updateCampaignContent,
         toggleRelay,
         resetCampaign,
       }}

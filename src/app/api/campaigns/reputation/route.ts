@@ -69,11 +69,10 @@ export async function GET(req: Request) {
     reputationScore = Math.max(0, reputationScore);
 
     // Get current daily limit based on warm-up
-    let currentLimit = 50;
-    if (accountAgeDays >= 30 && totalSent >= 1000) currentLimit = 400;
-    else if (accountAgeDays >= 14 && totalSent >= 300) currentLimit = 200;
-    else if (accountAgeDays >= 7 && totalSent >= 100) currentLimit = 100;
-    else if (accountAgeDays >= 3 && totalSent >= 30) currentLimit = 75;
+    let currentLimit = 300;
+    if (accountAgeDays >= 30 && totalSent >= 1000) currentLimit = 500;
+    else if (accountAgeDays >= 14 && totalSent >= 300) currentLimit = 400;
+    else if (accountAgeDays >= 7 && totalSent >= 100) currentLimit = 350;
 
     return NextResponse.json({
       reputation: {
