@@ -97,6 +97,7 @@ export default function CampaignsPage() {
   const {
     activeCampaignId, isRelayActive, status, lastEmailSent, relayError,
     allRecipients, attachments, setAttachments, sendingSpeed, setSendingSpeed,
+    inProgressCampaigns, campaignsLoading, checkActiveCampaign, switchCampaign, completeCampaign,
     smtpConfig, configLoading, saveSmtpConfig,
     startCampaign, updateCampaignContent, toggleRelay, resetCampaign,
   } = useCampaign();
@@ -578,12 +579,46 @@ export default function CampaignsPage() {
         </div>
 
       ) : !activeCampaignId ? (
-        /* ── CAMPAIGN CREATION FORM ── */
-        <form onSubmit={handleCreate} className="bg-[#15181D] p-5 border border-[#242930] rounded-xl space-y-5">
-          <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 uppercase font-bold tracking-wider pb-3 border-b border-[#242930]">
-            <Send className="w-4 h-4 text-[#89295E]" />
-            New Email Campaign
-          </div>
+        <div className="space-y-4">
+          {/* Ongoing campaign in database notice */}
+          {inProgressCampaigns && inProgressCampaigns.length > 0 && (
+            <div className="bg-[#1F2329] border border-[#E8B54D]/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-[#E8B54D]/15 text-[#E8B54D] flex items-center justify-center shrink-0">
+                  <Play className="w-4 h-4 fill-current" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#E8B54D]">
+                      Ongoing Campaign in Database
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#E8B54D]/20 text-[#E8B54D] font-bold">
+                      {inProgressCampaigns[0].pending} pending
+                    </span>
+                  </div>
+                  <p className="text-xs font-bold text-zinc-200 truncate mt-0.5">
+                    {inProgressCampaigns[0].subject || 'Ongoing Campaign'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => switchCampaign(inProgressCampaigns[0].id)}
+                  className="px-3.5 py-2 rounded-lg bg-[#E8B54D] hover:bg-[#d9a43a] text-black text-xs font-mono font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" /> Resume Campaign
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── CAMPAIGN CREATION FORM ── */}
+          <form onSubmit={handleCreate} className="bg-[#15181D] p-5 border border-[#242930] rounded-xl space-y-5">
+            <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 uppercase font-bold tracking-wider pb-3 border-b border-[#242930]">
+              <Send className="w-4 h-4 text-[#89295E]" />
+              New Email Campaign
+            </div>
 
           {/* Subject */}
           <div>
@@ -816,24 +851,62 @@ export default function CampaignsPage() {
             </button>
           </div>
         </form>
+      </div>
 
       ) : (
         /* ── PROGRESS MONITOR ── */
         <div className="bg-[#15181D] p-6 border border-[#242930] rounded-xl space-y-6">
 
+          {/* Other in-progress campaigns switcher */}
+          {inProgressCampaigns && inProgressCampaigns.length > 1 && (
+            <div className="bg-[#1F2329] border border-[#242930] rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono">
+              <span className="text-zinc-500 uppercase font-bold text-[10px] shrink-0">
+                Other In-Progress Campaigns in Database:
+              </span>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                {inProgressCampaigns.filter(c => c.id !== activeCampaignId).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => switchCampaign(c.id)}
+                    className="px-2.5 py-1 rounded bg-[#15181D] hover:bg-zinc-800 border border-[#242930] text-zinc-300 hover:text-white text-[10px] font-bold truncate max-w-[200px] shrink-0"
+                  >
+                    {c.subject || 'Campaign'} ({c.pending} left)
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Header */}
-          <div className="flex items-center justify-between pb-4 border-b border-[#242930]">
-            <div className="flex flex-col gap-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#242930] gap-3">
+            <div className="flex flex-col gap-1 min-w-0">
               <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Campaign Status</span>
               <h2 className="text-xl font-bold text-zinc-200 truncate pr-4 max-w-md">{status.subject || subject || 'Ongoing Campaign'}</h2>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={() => { if (confirm('Reset this campaign monitor? You can create a new one after.')) resetCampaign(); }}
+                onClick={() => {
+                  if (confirm('Leave this monitor to start a new campaign? This campaign will remain active in the database and can be resumed anytime from desktop or mobile.')) {
+                    resetCampaign();
+                  }
+                }}
                 className="flex items-center gap-2 px-3 py-2 rounded text-xs font-mono font-bold uppercase bg-[#1F2329] border border-[#242930] text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
               >
                 New Campaign
               </button>
+              {status.campaign_status !== 'completed' && (
+                <button
+                  onClick={async () => {
+                    if (confirm('Mark this campaign as completed in the database? Any remaining pending emails will not be sent.')) {
+                      await completeCampaign();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded text-xs font-mono font-bold uppercase bg-[#1F2329] border border-[#242930] text-zinc-400 hover:text-red-400 hover:border-red-400/30 transition-colors"
+                  title="Finish and archive this campaign"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> End Campaign
+                </button>
+              )}
               {status.campaign_status !== 'completed' && (
                 <button
                   onClick={() => {

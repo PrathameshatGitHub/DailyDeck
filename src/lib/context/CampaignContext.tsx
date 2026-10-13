@@ -30,29 +30,34 @@ export interface SmtpConfig {
 }
 
 interface CampaignContextType {
-  activeCampaignId: string | null;
-  isRelayActive:    boolean;
-  status:           CampaignStatus;
-  lastEmailSent:    string;
-  relayError:       string | null;
-  allRecipients:    RecipientCard[];
-  attachments:      Attachment[];
-  setAttachments:   React.Dispatch<React.SetStateAction<Attachment[]>>;
-  sendingSpeed:     'slow' | 'medium' | 'fast';
-  setSendingSpeed:  React.Dispatch<React.SetStateAction<'slow' | 'medium' | 'fast'>>;
+  activeCampaignId:     string | null;
+  isRelayActive:        boolean;
+  status:               CampaignStatus;
+  lastEmailSent:        string;
+  relayError:           string | null;
+  allRecipients:        RecipientCard[];
+  attachments:          Attachment[];
+  setAttachments:       React.Dispatch<React.SetStateAction<Attachment[]>>;
+  sendingSpeed:         'slow' | 'medium' | 'fast';
+  setSendingSpeed:      React.Dispatch<React.SetStateAction<'slow' | 'medium' | 'fast'>>;
+  inProgressCampaigns:  any[];
+  campaignsLoading:     boolean;
+  checkActiveCampaign:  () => Promise<void>;
+  switchCampaign:       (campaignId: string) => void;
+  completeCampaign:     (campaignId?: string) => Promise<boolean>;
   // Config stored in DB
-  smtpConfig:       SmtpConfig;
-  configLoading:    boolean;
-  saveSmtpConfig:   (config: Partial<SmtpConfig>) => Promise<{ success: boolean; error?: string }>;
-  startCampaign:    (
+  smtpConfig:           SmtpConfig;
+  configLoading:        boolean;
+  saveSmtpConfig:       (config: Partial<SmtpConfig>) => Promise<{ success: boolean; error?: string }>;
+  startCampaign:        (
     subject:    string,
     body:       string,
     recipients: string | RecipientCard[],
     replyTo:    string
   ) => Promise<boolean>;
   updateCampaignContent: (subject: string, body: string) => Promise<{ success: boolean; error?: string }>;
-  toggleRelay:   (active: boolean) => void;
-  resetCampaign: () => void;
+  toggleRelay:          (active: boolean) => void;
+  resetCampaign:        () => void;
 }
 
 const defaultConfig: SmtpConfig = {
@@ -80,6 +85,10 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   // DB-backed SMTP config
   const [smtpConfig,    setSmtpConfig]    = useState<SmtpConfig>(defaultConfig);
   const [configLoading, setConfigLoading] = useState(true);
+
+  // Active / In-progress campaigns from DB
+  const [inProgressCampaigns, setInProgressCampaigns] = useState<any[]>([]);
+  const [campaignsLoading,    setCampaignsLoading]    = useState(true);
 
   const [status, setStatus] = useState<CampaignStatus>({
     total: 0, pending: 0, sent: 0, failed: 0, campaign_status: '',
@@ -118,18 +127,50 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     setConfigLoading(false);
   }, [supabase]);
 
+  // ── 2. Check active & in-progress campaigns from DB ──────────────────────
+  const checkActiveCampaign = useCallback(async () => {
+    setCampaignsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setCampaignsLoading(false); return; }
+
+      const res = await fetch('/api/campaigns/active', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (data.in_progress_campaigns) {
+        setInProgressCampaigns(data.in_progress_campaigns);
+      }
+
+      const savedId = typeof window !== 'undefined' ? localStorage.getItem('activeCampaignId') : null;
+
+      if (data.has_active && data.active_campaign) {
+        const savedStillValid = savedId && data.in_progress_campaigns?.some((c: any) => c.id === savedId);
+        if (savedStillValid) {
+          setActiveCampaignId(savedId);
+        } else {
+          setActiveCampaignId(data.active_campaign.id);
+          localStorage.setItem('activeCampaignId', data.active_campaign.id);
+        }
+      } else if (!data.has_active) {
+        if (savedId) {
+          localStorage.removeItem('activeCampaignId');
+          setActiveCampaignId(null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check active campaign from DB:', err);
+    } finally {
+      setCampaignsLoading(false);
+    }
+  }, [supabase]);
+
   useEffect(() => {
     loadConfig();
-  }, [loadConfig]);
+    checkActiveCampaign();
+  }, [loadConfig, checkActiveCampaign]);
 
-  // ── 2. Persist activeCampaignId / relay state in localStorage (session-level only) ──
-  useEffect(() => {
-    const savedId          = localStorage.getItem('activeCampaignId');
-    const savedRelayActive = localStorage.getItem('isRelayActive');
-    if (savedId)                     setActiveCampaignId(savedId);
-    if (savedRelayActive === 'true') setIsRelayActive(true);
-  }, []);
-
+  // ── 3. Persist activeCampaignId / relay state in localStorage ───────────
   useEffect(() => {
     if (activeCampaignId) {
       localStorage.setItem('activeCampaignId', activeCampaignId);
@@ -293,6 +334,13 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
       const { data: { user }   } = await supabase.auth.getUser();
       if (!user) return false;
 
+      // Auto-save the latest subject, body and smtp email to user_smtp_config in DB so it's always persisted
+      await saveSmtpConfig({
+        campaign_subject: subject,
+        campaign_body:    body,
+        smtp_email:       smtpConfig.smtp_email || replyTo,
+      });
+
       const res = await fetch('/api/campaigns/create', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
@@ -305,7 +353,11 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         setLastEmailSent('');
         setAllRecipients([]);
         setActiveCampaignId(data.campaign_id);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('activeCampaignId', data.campaign_id);
+        }
         setIsRelayActive(true);
+        checkActiveCampaign();
         return true;
       }
       alert(data.error || 'Failed to create campaign');
@@ -331,9 +383,43 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: data.error || 'Failed to update campaign' };
       }
       setStatus(prev => ({ ...prev, subject: newSubject, body: newBody }));
-      return { success: true };
+      checkActiveCampaign();
+      return true as any;
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  };
+
+  const switchCampaign = (campaignId: string) => {
+    setActiveCampaignId(campaignId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeCampaignId', campaignId);
+    }
+    setIsRelayActive(false);
+  };
+
+  const completeCampaign = async (campaignId?: string): Promise<boolean> => {
+    const targetId = campaignId || activeCampaignId;
+    if (!targetId) return false;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/campaigns/active', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body:    JSON.stringify({ campaign_id: targetId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (targetId === activeCampaignId) {
+          resetCampaign();
+        }
+        await checkActiveCampaign();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Failed to complete campaign:', err);
+      return false;
     }
   };
 
@@ -347,8 +433,11 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     setLastEmailSent('');
     setRelayError(null);
     setAttachments([]);
-    localStorage.removeItem('activeCampaignId');
-    localStorage.setItem('isRelayActive', 'false');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('activeCampaignId');
+      localStorage.setItem('isRelayActive', 'false');
+    }
+    checkActiveCampaign();
   };
 
   return (
@@ -364,6 +453,11 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
         setAttachments,
         sendingSpeed,
         setSendingSpeed,
+        inProgressCampaigns,
+        campaignsLoading,
+        checkActiveCampaign,
+        switchCampaign,
+        completeCampaign,
         smtpConfig,
         configLoading,
         saveSmtpConfig,
